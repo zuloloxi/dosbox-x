@@ -41,6 +41,10 @@
 
 #include <string.h>
 
+#if C_GAMELINK
+#include "../gamelink/gamelink.h"
+#endif // C_GAMELINK
+
 static MEM_Callout_t lfb_mem_cb = MEM_Callout_t_none;
 static MEM_Callout_t lfb_mmio_cb = MEM_Callout_t_none;
 
@@ -49,10 +53,10 @@ static MEM_Callout_t lfb_mmio_cb = MEM_Callout_t_none;
 
 class MEM_callout_vector : public std::vector<MEM_CalloutObject> {
 public:
-    MEM_callout_vector() : std::vector<MEM_CalloutObject>(), getcounter(0), alloc_from(0) { };
+    MEM_callout_vector() : std::vector<MEM_CalloutObject>() { };
 public:
-    unsigned int getcounter;
-    unsigned int alloc_from;
+    unsigned int getcounter = 0;
+    unsigned int alloc_from = 0;
 };
 
 static MEM_callout_vector MEM_callouts[MEM_callouts_max];
@@ -72,13 +76,11 @@ extern bool VIDEO_BIOS_always_carry_14_high_font;
 extern bool VIDEO_BIOS_always_carry_16_high_font;
 
 static struct MemoryBlock {
-    MemoryBlock() : pages(0), handler_pages(0), reported_pages(0), phandlers(NULL), mhandles(NULL), mem_alias_pagemask(0), mem_alias_pagemask_active(0), address_bits(0) { }
-
-    Bitu pages;
-    Bitu handler_pages;
-    Bitu reported_pages;
-    PageHandler * * phandlers;
-    MemHandle * mhandles;
+    Bitu pages = 0;
+    Bitu handler_pages = 0;
+    Bitu reported_pages = 0;
+    PageHandler * * phandlers = NULL;
+    MemHandle * mhandles = NULL;
     struct {
         Bitu        start_page;
         Bitu        end_page;
@@ -95,9 +97,9 @@ static struct MemoryBlock {
         bool enabled;
         uint8_t controlport;
     } a20 = {};
-    uint32_t mem_alias_pagemask;
-    uint32_t mem_alias_pagemask_active;
-    uint32_t address_bits;
+    uint32_t mem_alias_pagemask = 0;
+    uint32_t mem_alias_pagemask_active = 0;
+    uint32_t address_bits = 0;
 } memory;
 
 uint32_t MEM_get_address_bits() {
@@ -1754,7 +1756,11 @@ void Init_AddressLimitAndGateMask() {
 void ShutDownRAM(Section * sec) {
     (void)sec;//UNUSED
     if (MemBase != NULL) {
+#if C_GAMELINK
+        GameLink::FreeRAM(MemBase);
+#else
         delete [] MemBase;
+#endif
         MemBase = NULL;
     }
 }
@@ -1851,7 +1857,11 @@ void Init_RAM() {
 
     /* Allocate the RAM. We alloc as a large unsigned char array. new[] does not initialize the array,
      * so we then must zero the buffer. */
+#if C_GAMELINK
+    MemBase = GameLink::AllocRAM(memory.pages*4096);
+#else // C_GAMELINK
     MemBase = new(std::nothrow) uint8_t[memory.pages*4096];
+#endif // C_GAMELINK
     if (!MemBase) E_Exit("Can't allocate main memory of %d KB",(int)memsizekb);
     /* Clear the memory, as new doesn't always give zeroed memory
      * (Visual C debug mode). We want zeroed memory though. */

@@ -240,7 +240,7 @@ ENETServerSocket::~ENETServerSocket()
 	isopen = false;
 }
 
-// covert an ENet address to a string
+// convert an ENet address to a string
 static char *enet_address_to_string(const ENetAddress &address)
 {
 	static char ip_buf[INET_ADDRSTRLEN];
@@ -555,8 +555,8 @@ public:
 			return;
 
 		assert(already_tried_once);
+		is_initialized = false;
 		SDLNet_Quit();
-		LOG_MSG("SDLNET: Shutdown SDL network subsystem");
 	}
 
 	bool IsInitialized() const { return is_initialized; }

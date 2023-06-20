@@ -94,9 +94,9 @@ void DOS_SetDefaultDrive(uint8_t drive) {
 	if (drive<DOS_DRIVES && ((drive<2) || Drives[drive])) {dos.current_drive = drive; DOS_SDA(DOS_SDA_SEG,DOS_SDA_OFS).SetDrive(drive);}
 }
 
-bool DOS_MakeName(char const * const name,char * const fullname,uint8_t * drive) {
+bool DOS_MakeName(char const * const name,char * const fullname,uint8_t * drive,bool isVolume) {
 	if(!name || *name == 0 || *name == ' ' || *name == '\n' || *name == ':') {
-		/* Both \0 and space are seperators and
+		/* Both \0 and space are separators and
 		 * empty filenames report file not found */
 		DOS_SetError(DOSERR_FILE_NOT_FOUND);
 		return false;
@@ -104,7 +104,17 @@ bool DOS_MakeName(char const * const name,char * const fullname,uint8_t * drive)
 	char names[LFN_NAMELENGTH];
 	strcpy(names,name);
 	char * name_int = names;
-	if (strlen(names)==14 && name_int[1]==':' && name_int[2]!='\\' && name_int[9]==' ' && name_int[10]=='.') {
+    if (isVolume)
+    {
+        if(name_int[10] == '.') // Remove extension dot
+        {
+                name_int[10] = name_int[11];
+                name_int[11] = name_int[12];
+                name_int[12] = name_int[13];
+                name_int[13] = 32;
+        }
+	}
+	else if (strlen(names)==14 && name_int[1]==':' && name_int[2]!='\\' && name_int[9]==' ' && name_int[10]=='.') {
 		for (unsigned int i=0;i<strlen(names);i++)
 			if (i<10 && name_int[i]==32) {
 				name_int[i]='.';
@@ -116,8 +126,8 @@ bool DOS_MakeName(char const * const name,char * const fullname,uint8_t * drive)
 			} else if (i<10) name_int[i]=toupper(name_int[i]);
 #if defined(WIN32) && !(defined(__MINGW32__) && !defined(__MINGW64_VERSION_MAJOR))
 	} else if (Network_IsNetworkResource(name)) {
-		int j=0, k=name[0]=='"'?1:0;
-		if (strlen(name)==2+k||name[2+k]=='*'||name[2+k]=='?'||name[2+k]=='\\'||strlen(name)==3+k&&name[2+k]=='"') {
+		unsigned int j=0, k=name[0]=='"'?1:0;
+		if (strlen(name)==2+k||name[2+k]=='*'||name[2+k]=='?'||name[2+k]=='\\'||(strlen(name)==3+k&&name[2+k]=='"')) {
 			DOS_SetError(DOSERR_PATH_NOT_FOUND);
 			return false;
 		}
@@ -133,8 +143,8 @@ bool DOS_MakeName(char const * const name,char * const fullname,uint8_t * drive)
 #endif
 	}
 
-	char tempdir[DOS_PATHLENGTH];
-	char upname[DOS_PATHLENGTH];
+    char tempdir[DOS_PATHLENGTH] = {};
+    char upname[DOS_PATHLENGTH] = {};
     Bitu r,w, q=0;
 	/* First get the drive */
 	*drive = DOS_GetDefaultDrive();
@@ -150,6 +160,13 @@ bool DOS_MakeName(char const * const name,char * const fullname,uint8_t * drive)
 		DOS_SetError(DOSERR_PATH_NOT_FOUND);
 		return false; 
 	}
+
+    if(isVolume) // Don't process any further
+    {
+        strcpy(fullname, name_int);
+        return true;
+    }
+
 	r=0;w=0;
 	while (r<DOS_PATHLENGTH && name_int[r]!=0) {
 		uint8_t c=(uint8_t)name_int[r++];
@@ -247,7 +264,7 @@ bool DOS_MakeName(char const * const name,char * const fullname,uint8_t * drive)
 				if (ext) {
 					if(strchr(ext+1,'.')) { 
 					//another dot in the extension =>file not found
-					//Or path not found depending on wether 
+					//Or path not found depending on whether
 					//we are still in dir check stage or file stage
 						if(stop)
 							DOS_SetError(DOSERR_FILE_NOT_FOUND);
@@ -282,7 +299,7 @@ bool DOS_GetSFNPath(char const * const path,char * SFNPath,bool LFN) {
     char pdir[LFN_NAMELENGTH+4], *p;
     uint8_t drive;char fulldir[DOS_PATHLENGTH],LFNPath[CROSS_LEN];
     char name[DOS_NAMELENGTH_ASCII], lname[LFN_NAMELENGTH];
-    uint32_t size;uint16_t date;uint16_t time;uint8_t attr;
+    uint32_t size,hsize;uint16_t date;uint16_t time;uint8_t attr;
     if (!DOS_MakeName(path,fulldir,&drive)) return false;
 #if defined(WIN32) && !(defined(__MINGW32__) && !defined(__MINGW64_VERSION_MAJOR))
 	if (Network_IsNetworkResource(fulldir)) {
@@ -300,7 +317,7 @@ bool DOS_GetSFNPath(char const * const path,char * SFNPath,bool LFN) {
 	int fbak=lfn_filefind_handle;
     for (char *s = strchr_dbcs(p,'\\'); s != NULL; s = strchr_dbcs(p,'\\')) {
 		*s = 0;
-		if (SFNPath[strlen(SFNPath)-1]=='\\')
+		if (check_last_split_char(SFNPath, strlen(SFNPath), '\\'))
 			sprintf(pdir,"\"%s%s\"",SFNPath,p);
 		else
 			sprintf(pdir,"\"%s\\%s\"",SFNPath,p);
@@ -310,7 +327,7 @@ bool DOS_GetSFNPath(char const * const path,char * SFNPath,bool LFN) {
 			lfn_filefind_handle=LFN_FILEFIND_INTERNAL;
 			if (DOS_FindFirst(pdir,0xffff & DOS_ATTR_DIRECTORY & ~DOS_ATTR_VOLUME,false)) {
 				lfn_filefind_handle=fbak;
-				dta.GetResult(name,lname,size,date,time,attr);
+				dta.GetResult(name,lname,size,hsize,date,time,attr);
 				strcat(SFNPath,name);
 				strcat(LFNPath,lname);
 				strcat(SFNPath,"\\");
@@ -335,7 +352,7 @@ bool DOS_GetSFNPath(char const * const path,char * SFNPath,bool LFN) {
 		sprintf(pdir,"\"%s%s\"",SFNPath,p);
 		lfn_filefind_handle=LFN_FILEFIND_INTERNAL;
 		if (!strrchr(p,'*')&&!strrchr(p,'?')&&DOS_FindFirst(pdir,0xffff & ~DOS_ATTR_VOLUME,false)) {
-			dta.GetResult(name,lname,size,date,time,attr);
+			dta.GetResult(name,lname,size,hsize,date,time,attr);
 			strcat(SFNPath,name);
 			strcat(LFNPath,lname);
         } else if (checkwat) {
@@ -393,7 +410,7 @@ bool DOS_ChangeDir(char const * const dir) {
 		return false;
 	}
 	if (!DOS_MakeName(dir,fulldir,&drive)) return false;
-	if (strlen(fulldir) && testdir[len-1]=='\\') {
+	if (strlen(fulldir) && check_last_split_char(testdir, len, '\\')) {
 		DOS_SetError(DOSERR_PATH_NOT_FOUND);
 		return false;
 	}
@@ -410,7 +427,7 @@ bool DOS_ChangeDir(char const * const dir) {
 bool DOS_MakeDir(char const * const dir) {
 	uint8_t drive;char fulldir[DOS_PATHLENGTH];
 	size_t len = strlen(dir);
-	if(!len || dir[len-1] == '\\') {
+	if(!len || check_last_split_char(dir, len, '\\')) {
 		DOS_SetError(DOSERR_PATH_NOT_FOUND);
 		return false;
 	}
@@ -550,17 +567,19 @@ bool DOS_FindFirst(const char * search,uint16_t attr,bool fcb_findfirst) {
 	uint8_t drive;char fullsearch[DOS_PATHLENGTH];
 	char dir[DOS_PATHLENGTH];char pattern[DOS_PATHLENGTH];
 	size_t len = strlen(search);
-	if(len && search[len - 1] == '\\' && !( (len > 2) && (search[len - 2] == ':') && (attr == DOS_ATTR_VOLUME) )) { 
-		//Dark Forces installer, but c:\ is allright for volume labels(exclusively set)
+	if(len && check_last_split_char(search, len, '\\') && !( (len > 2) && (search[len - 2] == ':') && (attr == DOS_ATTR_VOLUME) )) { 
+		//Dark Forces installer, but c:\ is alright for volume labels(exclusively set)
 		DOS_SetError(DOSERR_NO_MORE_FILES);
 		return false;
 	}
-	if (!DOS_MakeName(search,fullsearch,&drive)) return false;
+	if (!DOS_MakeName(search,fullsearch,&drive,attr == DOS_ATTR_VOLUME)) return false;
 	//Check for devices. FindDevice checks for leading subdir as well
-	bool device = (DOS_FindDevice(search) != DOS_DEVICES);
+    bool device = false;
+    if (attr & DOS_ATTR_DEVICE)
+        device = DOS_FindDevice(search) != DOS_DEVICES;
 
-	/* Split the search in dir and pattern */
-	forcelfn = false;
+    /* Split the search in dir and pattern */
+    forcelfn = false;
 	char *find_last = NULL;
 #if defined(WIN32) && !(defined(__MINGW32__) && !defined(__MINGW64_VERSION_MAJOR))
 	bool net = Network_IsNetworkResource(search);
@@ -598,7 +617,7 @@ bool DOS_FindFirst(const char * search,uint16_t attr,bool fcb_findfirst) {
 		find_last = strrchr(pattern,'.');
 		if(find_last) *find_last = 0;
 		//TODO use current date and time
-        dta.SetResult(pattern,pattern,0,0,0,DOS_ATTR_DEVICE);
+        dta.SetResult(pattern,pattern,0,0,0,0,DOS_ATTR_DEVICE);
 		LOG(LOG_DOSMISC,LOG_WARN)("finding device %s",pattern);
 		return true;
 	}
@@ -882,9 +901,12 @@ bool DOS_OpenFile(char const * name,uint8_t flags,uint16_t * entry,bool fcb) {
         else
 		    Files[handle]=new DOS_Device(*Devices[devnum]);
 	} else {
+		uint16_t olderror=dos.errorcode;
+		dos.errorcode=0;
         exists=Drives[drive]->FileOpen(&Files[handle],fullname,flags) || Drives[drive]->FileOpen(&Files[handle],upcase(fullname),flags);
 		if (exists) Files[handle]->SetDrive(drive);
 		else if (dos.errorcode==DOSERR_ACCESS_CODE_INVALID) return false;
+		dos.errorcode=olderror;
 	}
 	if (exists || device ) { 
 		Files[handle]->AddRef();
@@ -1006,8 +1028,8 @@ bool DOS_UnlinkFile(char const * const name) {
 		bool ret=DOS_FindFirst(((pfull.length()&&pfull[0]=='"'?"":"\"")+pfull+(pfull.length()&&pfull[pfull.length()-1]=='"'?"":"\"")).c_str(),0xffu & ~DOS_ATTR_VOLUME & ~DOS_ATTR_DIRECTORY);
 		if (ret) do {
 			char find_name[DOS_NAMELENGTH_ASCII],lfind_name[LFN_NAMELENGTH];
-			uint16_t find_date,find_time;uint32_t find_size;uint8_t find_attr;
-			dta.GetResult(find_name,lfind_name,find_size,find_date,find_time,find_attr);
+			uint16_t find_date,find_time;uint32_t find_size,find_hsize;uint8_t find_attr;
+			dta.GetResult(find_name,lfind_name,find_size,find_hsize,find_date,find_time,find_attr);
 			if (!(find_attr & DOS_ATTR_DIRECTORY)&&strlen(find_name)&&!strchr(find_name, '*')&&!strchr(find_name, '?')) {
 				strcpy(temp, dir);
 				if (strlen(temp)&&temp[strlen(temp)-1]!='\\') strcat(temp, "\\");
@@ -1101,7 +1123,7 @@ bool DOS_SetFileAttr(char const * const name,uint16_t attr)
 	 * Also Windows 95 setup likes to create WINBOOT.INI as a file and then chattr it into a directory for some stupid reason. */
 	uint16_t old_attr;
 #if defined(WIN32) && !(defined(__MINGW32__) && !defined(__MINGW64_VERSION_MAJOR))
-	if (Network_IsNetworkResource(name)&&!Network_GetFileAttr(name,&old_attr)||!Network_IsNetworkResource(name)&&!Drives[drive]->GetFileAttr(fullname,&old_attr))
+	if ((Network_IsNetworkResource(name)&&!Network_GetFileAttr(name,&old_attr))||(!Network_IsNetworkResource(name)&&!Drives[drive]->GetFileAttr(fullname,&old_attr)))
 #else
 	if (!Drives[drive]->GetFileAttr(fullname,&old_attr))
 #endif
@@ -1304,11 +1326,12 @@ bool DOS_CreateTempFile(char * const name,uint16_t * entry) {
 		tempname[0]='\\';
 		tempname++;
 	} else {
-		if ((name[namelen-1]!='\\') && (name[namelen-1]!='/')) {
+		if (!check_last_split_char(name, namelen, '\\') && (name[namelen-1]!='/')) {
 			tempname[0]='\\';
 			tempname++;
 		}
 	}
+	uint16_t olderror=dos.errorcode;
 	dos.errorcode=0;
 	/* add random crap to the end of the name and try to open */
 	initRand();
@@ -1324,6 +1347,7 @@ bool DOS_CreateTempFile(char * const name,uint16_t * entry) {
 	} while (cont || DOS_FileExists(name));
 	DOS_CreateFile(name,0,entry);
 	if (dos.errorcode) return false;
+	dos.errorcode=olderror;
 	return true;
 }
 
@@ -1534,13 +1558,13 @@ void DTAExtendName(char * const name,char * const filename,char * const ext) {
 static void SaveFindResult(DOS_FCB & find_fcb) {
 	DOS_DTA find_dta(dos.tables.tempdta);
     char name[DOS_NAMELENGTH_ASCII],lname[LFN_NAMELENGTH];
-    uint32_t size;uint16_t date;uint16_t time;uint8_t attr;uint8_t drive;
+    uint32_t size,hsize;uint16_t date;uint16_t time;uint8_t attr;uint8_t drive;
 	char file_name[9];char ext[4];
-	find_dta.GetResult(name,lname,size,date,time,attr);
+	find_dta.GetResult(name,lname,size,hsize,date,time,attr);
 	drive=find_fcb.GetDrive()+1;
 	uint8_t find_attr = DOS_ATTR_ARCHIVE;
 	find_fcb.GetAttr(find_attr); /* Gets search attributes if extended */
-	/* Create a correct file and extention */
+	/* Create a correct file and extension */
     if (attr & DOS_ATTR_VOLUME)
         DTAExtendNameVolumeLabel(name,file_name,ext);
     else
@@ -1583,8 +1607,8 @@ bool DOS_FCBOpen(uint16_t seg,uint16_t offset) {
 		DOS_DTA find_dta(dos.tables.tempdta);
 		DOS_FCB find_fcb(RealSeg(dos.tables.tempdta),RealOff(dos.tables.tempdta));
 		char name[DOS_NAMELENGTH_ASCII],lname[LFN_NAMELENGTH],file_name[9],ext[4];
-		uint32_t size;uint16_t date,time;uint8_t attr;
-		find_dta.GetResult(name,lname,size,date,time,attr);
+		uint32_t size,hsize;uint16_t date,time;uint8_t attr;
+		find_dta.GetResult(name,lname,size,hsize,date,time,attr);
 		DTAExtendName(name,file_name,ext);
 		find_fcb.SetName(fcb.GetDrive()+1,file_name,ext);
 		find_fcb.GetName(shortname);
@@ -1735,7 +1759,7 @@ uint8_t DOS_FCBIncreaseSize(uint16_t seg,uint16_t offset) {
 }
 
 uint8_t DOS_FCBRandomRead(uint16_t seg,uint16_t offset,uint16_t * numRec,bool restore) {
-/* if restore is true :random read else random blok read. 
+/* if restore is true :random read else random block read.
  * random read updates old block and old record to reflect the random data
  * before the read!!!!!!!!! and the random data is not updated! (user must do this)
  * Random block read updates these fields to reflect the state after the read!
@@ -2422,7 +2446,7 @@ void POD_Load_DOS_Files( std::istream& stream )
                     MSCDEX_SetCDInterface(CDROM_USE_SDL, -1);
                     uint8_t mediaid = 0xF8;
                     int error = -1;
-                    isoDrive* newDrive = new isoDrive('A'+lcv, dinfo+9, mediaid, error);
+                    isoDrive* newDrive = new isoDrive('A'+lcv, dinfo+9, mediaid, error, options);
                     if (!error) {
                         Drives[lcv] = newDrive;
                         DriveManager::AppendDisk(lcv, newDrive);
@@ -2556,10 +2580,11 @@ void POD_Load_DOS_Files( std::istream& stream )
             if( Drives[lcv] && strcasecmp(Drives[lcv]->info, dinfo))
                 unmount(lcv);
             if (!Drives[lcv] && !strncmp(dinfo,"isoDrive ",9)) {
+                std::vector<std::string> options;
                 MSCDEX_SetCDInterface(CDROM_USE_SDL, -1);
                 uint8_t mediaid = 0xF8;
                 int error = -1;
-                isoDrive* newDrive = new isoDrive('A'+lcv, dinfo+9, mediaid, error);
+                isoDrive* newDrive = new isoDrive('A'+lcv, dinfo+9, mediaid, error, options);
                 if (!error) {
                     Drives[lcv] = newDrive;
                     DriveManager::AppendDisk(lcv, newDrive);

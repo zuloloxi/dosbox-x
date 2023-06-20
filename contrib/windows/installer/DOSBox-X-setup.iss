@@ -1,5 +1,5 @@
 ﻿#define MyAppName "DOSBox-X"
-#define MyAppVersion "0.83.25"
+#define MyAppVersion "2023.05.01"
 #define MyAppBit "(32-bit)"
 #define MyAppPublisher "joncampbell123 [DOSBox-X Team]"
 #define MyAppURL "https://dosbox-x.com/"
@@ -34,6 +34,7 @@ DisableStartupPrompt=yes
 DisableWelcomePage=no
 DisableDirPage=no
 DisableReadyPage=no
+ShowLanguageDialog=no
 AlwaysShowDirOnReadyPage=yes
 AlwaysShowGroupOnReadyPage=yes
 ArchitecturesInstallIn64BitMode=x64
@@ -48,11 +49,33 @@ InfoBeforeLabel=Please read the general information about DOSBox-X below.
 InfoAfterClickLabel=You have now installed DOSBox-X. Please note that you can customize DOSBox-X settings in dosbox-x.conf. Also, when in the DOSBox-X command line, you can type HELP for DOSBox-X help, or EXIT to close the DOSBox-X window.
 
 [Languages]
-Name: "english"; MessagesFile: "compiler:Default.isl"
+Name: "en"; MessagesFile: "compiler:Default.isl"
+Name: "fr"; MessagesFile: "compiler:Default.isl"
+Name: "ge"; MessagesFile: "compiler:Default.isl"
+Name: "ja"; MessagesFile: "compiler:Default.isl"
+Name: "ko"; MessagesFile: "compiler:Default.isl"
+Name: "pt"; MessagesFile: "compiler:Default.isl"
+Name: "sc"; MessagesFile: "compiler:Default.isl"
+Name: "sp"; MessagesFile: "compiler:Default.isl"
+Name: "tc"; MessagesFile: "compiler:Default.isl"
+Name: "tr"; MessagesFile: "compiler:Default.isl"
+
+[LangOptions]
+en.LanguageID=$0409
+fr.LanguageID=$040C
+ge.LanguageID=$0407
+ja.LanguageID=$0411
+ko.LanguageID=$0412
+pt.LanguageID=$0416
+sc.LanguageID=$0804
+sp.LanguageID=$0C0A
+tc.LanguageID=$0404
+tr.LanguageID=$041F
 
 [Tasks]
 Name: "contextmenu"; Description: "Add ""Run/Open with DOSBox-X"" context menu for Windows Explorer"
 Name: "commonoption"; Description: "Write common config options (instead of all) to the configuration file"
+Name: "centerwindow"; Description: "Automatically center the window on the screen when DOSBox-X starts"
 Name: "drivedelay"; Description: "Emulate the slowness of floppy drive and hard drive data transfers"; Flags: unchecked
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"
 Name: "quicklaunchicon"; Description: "{cm:CreateQuickLaunchIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
@@ -76,8 +99,10 @@ Source: ".\dosbox-x.reference.setup.conf"; DestDir: "{app}"; Flags: ignoreversio
 Source: "..\..\..\CHANGELOG"; DestDir: "{app}"; DestName: "changelog.txt"; Flags: ignoreversion; Components: full typical compact
 Source: "..\..\..\COPYING"; DestDir: "{app}"; DestName: "COPYING.txt"; Flags: ignoreversion; Components: full typical compact
 Source: "..\..\fonts\FREECG98.BMP"; DestDir: "{app}"; Flags: ignoreversion; Components: full typical
+Source: "..\..\fonts\wqy_1?pt.bdf"; DestDir: "{app}"; Flags: ignoreversion; Components: full typical
 Source: "..\..\fonts\Nouveau_IBM.ttf"; DestDir: "{app}"; Flags: ignoreversion; Components: full typical compact
 Source: "..\..\fonts\SarasaGothicFixed.ttf"; DestDir: "{app}"; Flags: ignoreversion; Components: full typical compact
+Source: "..\..\translations\de\de_DE.lng"; DestDir: "{app}\languages"; Flags: ignoreversion; Components: full typical compact
 Source: "..\..\translations\en\en_US.lng"; DestDir: "{app}\languages"; Flags: ignoreversion; Components: full typical compact
 Source: "..\..\translations\es\es_ES.lng"; DestDir: "{app}\languages"; Flags: ignoreversion; Components: full typical compact
 Source: "..\..\translations\fr\fr_FR.lng"; DestDir: "{app}\languages"; Flags: ignoreversion; Components: full typical compact
@@ -99,6 +124,7 @@ Source: "Win32_builds\ARM_Release_SDL2\dosbox-x.exe"; DestDir: "{app}"; Flags: i
 Source: "Win32_builds\mingw\dosbox-x.exe"; DestDir: "{app}"; Flags: ignoreversion; Check: CheckDirName('Win32_builds\mingw'); Components: full typical compact
 Source: "Win32_builds\mingw-sdl2\dosbox-x.exe"; DestDir: "{app}"; Flags: ignoreversion; Check: CheckDirName('Win32_builds\mingw-sdl2'); Components: full typical compact
 Source: "Win32_builds\mingw-lowend\dosbox-x.exe"; DestDir: "{app}"; Flags: ignoreversion; Check: CheckDirName('Win32_builds\mingw-lowend'); Components: full typical compact
+Source: "Win32_builds\mingw-lowend-sdl2\dosbox-x.exe"; DestDir: "{app}"; Flags: ignoreversion; Check: CheckDirName('Win32_builds\mingw-lowend-sdl2'); Components: full typical compact
 Source: "Win32_builds\*"; DestDir: "{app}\Win32_builds"; Flags: ignoreversion recursesubdirs createallsubdirs; Components: full
 ; NOTE: Don't use "Flags: ignoreversion" on any shared system files
 
@@ -116,6 +142,7 @@ Name: "{group}\All DOSBox-X builds\ARM Release SDL2"; Filename: "{app}\Win32_bui
 Name: "{group}\All DOSBox-X builds\32-bit MinGW SDL1"; Filename: "{app}\Win32_builds\mingw\dosbox-x.exe"; WorkingDir: "{app}"; Check: IsWindowsVersionOrNewer(6, 0); Components: full
 Name: "{group}\All DOSBox-X builds\32-bit MinGW SDL2"; Filename: "{app}\Win32_builds\mingw-sdl2\dosbox-x.exe"; WorkingDir: "{app}"; check: IsWindowsVersionOrNewer(6, 0); Components: full
 Name: "{group}\All DOSBox-X builds\32-bit MinGW lowend"; Filename: "{app}\Win32_builds\mingw-lowend\dosbox-x.exe"; WorkingDir: "{app}"; check: Is32BitInstaller(); Components: full
+Name: "{group}\All DOSBox-X builds\32-bit MinGW lowend SDL2"; Filename: "{app}\Win32_builds\mingw-lowend-sdl2\dosbox-x.exe"; WorkingDir: "{app}"; check: Is32BitInstaller(); Components: full
 Name: "{code:GetDesktopFolder}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
 Name: "{userappdata}\Microsoft\Internet Explorer\Quick Launch\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: quicklaunchicon
 
@@ -126,9 +153,10 @@ Type: files; Name: "{group}\All DOSBox-X builds\x86 Release SDL2.lnk"; Component
 Type: files; Name: "{group}\All DOSBox-X builds\ARM Release SDL1.lnk"; Components: typical compact
 Type: files; Name: "{group}\All DOSBox-X builds\ARM Release SDL2.lnk"; Components: typical compact
 Type: files; Name: "{group}\All DOSBox-X builds\32-bit MinGW SDL1.lnk"; Components: typical compact
-Type: files; Name: "{group}\All DOSBox-X builds\32-bit MinGW SDL1 lowend.lnk"; Components: typical compact
-Type: files; Name: "{group}\All DOSBox-X builds\32-bit MinGW SDL1 drawn.lnk"; Components: typical compact
 Type: files; Name: "{group}\All DOSBox-X builds\32-bit MinGW SDL2.lnk"; Components: typical compact
+Type: files; Name: "{group}\All DOSBox-X builds\32-bit MinGW SDL1 lowend.lnk"; Components: typical compact
+Type: files; Name: "{group}\All DOSBox-X builds\32-bit MinGW SDL2 lowend.lnk"; Components: typical compact
+Type: files; Name: "{group}\All DOSBox-X builds\32-bit MinGW SDL1 drawn.lnk"; Components: typical compact
 
 [Registry]
 Root: HKCU; Subkey: "Software\DOSBox-X"; Flags: uninsdeletekeyifempty
@@ -174,7 +202,7 @@ Type: files; Name: "{app}\stderr.txt"
 
 [Code]
 var
-  msg: string;
+  msg, lang: string;
   HelpButton: TNewButton;
   PageCustom: TInputFileWizardPage;
   PageBuild, PageLang, PageOutput, PageFont, PageVer: TInputOptionWizardPage;
@@ -208,7 +236,7 @@ begin
 end;
 procedure HelpButtonOnClick(Sender: TObject);
 begin
-  MsgBox('The Setup pre-selects a Windows build for you according to your platform automatically, but you can change the default build to run if you encounter specific problem(s) with the pre-selected one.' #13#13 'For example, while the SDL1 version is the default version to run, the SDL2 version may be preferred over the SDL1 version for certain features such as improved keyboard and touchscreen support. Also, MinGW builds may work better with certain features (such as the Slirp backend for the NE2000 networking in most MinGW builds) than Visual Studio builds even though they do not come with the debugger.' #13#13 'If you are not sure about which build to use, then you can just leave it unmodified and use the pre-selected one as the default build.', mbConfirmation, MB_OK);
+  MsgBox('The Setup pre-selects a Windows build for you according to your platform automatically, but you can change the default build to run if you encounter specific problem(s) with the pre-selected one.' #13#13 'For example, while the SDL1 version is the default version to run, the SDL2 version may be preferred over the SDL1 version for certain features such as improved keyboard and touchscreen support. Also, MinGW builds may work better with certain features (such as the Slirp backend for the NE2000 networking in standard MinGW builds) than Visual Studio builds even though they do not come with the debugger.' #13#13 'If you are not sure about which build to use, then you can just leave it unmodified and use the pre-selected one as the default build.', mbConfirmation, MB_OK);
 end;
 procedure CreateHelpButton(X: integer; Y: integer; W: integer; H: integer);
 begin
@@ -221,6 +249,97 @@ begin
   HelpButton.OnClick := @HelpButtonOnClick;
   HelpButton.Parent  := WizardForm;
 end;
+procedure SetLanguage();
+var
+i: Integer;
+line, linetmp, section: String;
+FileLines: TStringList;
+begin
+      if FileExists(ExpandConstant('{app}\dosbox-x.conf')) and (PageLang.Values[1] or PageLang.Values[2] or PageLang.Values[3] or PageLang.Values[4] or PageLang.Values[5] or PageLang.Values[6] or PageLang.Values[7] or PageLang.Values[8] or PageLang.Values[9]) then
+      begin
+        FileLines := TStringList.Create;
+        FileLines.LoadFromFile(ExpandConstant('{app}\dosbox-x.conf'));
+        section := '';
+        for i := 0 to FileLines.Count - 1 do
+        begin
+          line := Trim(FileLines[i]);
+          if (Length(line)>2) and (Copy(line, 1, 1) = '[') and (Copy(line, Length(line), 1) = ']') then
+            section := Copy(line, 2, Length(line)-2);
+          if (Length(line)>0) and (Copy(line, 1, 1) <> '#') and (Copy(line, 1, 1) <> '[') and (Pos('=', line) > 1) then
+          begin
+            linetmp := Trim(Copy(line, 1, Pos('=', line) - 1));
+            if (CompareText(linetmp, 'language') = 0) and (CompareText(section, 'dosbox') = 0) then
+            begin
+              linetmp := Trim(Copy(line, 1, Pos('=', line)));
+              if (PageLang.Values[1]) and FileExists(ExpandConstant('{app}\languages\fr_FR.lng')) then
+                FileLines[i] := linetmp+' fr_FR';
+              if (PageLang.Values[2]) and FileExists(ExpandConstant('{app}\languages\de_DE.lng')) then
+                FileLines[i] := linetmp+' de_DE';
+              if (PageLang.Values[3]) and FileExists(ExpandConstant('{app}\languages\ja_JP.lng')) then
+                FileLines[i] := linetmp+' ja_JP';
+              if (PageLang.Values[4]) and FileExists(ExpandConstant('{app}\languages\ko_KR.lng')) then
+                FileLines[i] := linetmp+' ko_KR';
+              if (PageLang.Values[5]) and FileExists(ExpandConstant('{app}\languages\pt_BR.lng')) then
+                FileLines[i] := linetmp+' pt_BR';
+              if (PageLang.Values[6]) and FileExists(ExpandConstant('{app}\languages\zh_CN.lng')) then
+                FileLines[i] := linetmp+' zh_CN';
+              if (PageLang.Values[7]) and FileExists(ExpandConstant('{app}\languages\es_ES.lng')) then
+                FileLines[i] := linetmp+' es_ES';
+              if (PageLang.Values[8]) and FileExists(ExpandConstant('{app}\languages\zh_TW.lng')) then
+                FileLines[i] := linetmp+' zh_TW';
+              if (PageLang.Values[9]) and FileExists(ExpandConstant('{app}\languages\tr_TR.lng')) then
+                FileLines[i] := linetmp+' tr_TR';
+            end;
+            if (CompareText(linetmp, 'keyboardlayout') = 0) and (CompareText(section, 'dos') = 0) then
+            begin
+              linetmp := Trim(Copy(line, 1, Pos('=', line)));
+              if (PageLang.Values[1]) then
+                FileLines[i] := linetmp+' fr';
+              if (PageLang.Values[2]) then
+                FileLines[i] := linetmp+' de';
+              if (PageLang.Values[3]) then
+                FileLines[i] := linetmp+' jp';
+              if (PageLang.Values[4]) then
+                FileLines[i] := linetmp+' ko';
+              if (PageLang.Values[5]) then
+                FileLines[i] := linetmp+' br';
+              if (PageLang.Values[6]) then
+                FileLines[i] := linetmp+' cn';
+              if (PageLang.Values[7]) then
+                FileLines[i] := linetmp+' sp';
+              if (PageLang.Values[8]) then
+                FileLines[i] := linetmp+' tw';
+              if (PageLang.Values[9]) then
+                FileLines[i] := linetmp+' tr';
+            end;
+            if (CompareText(linetmp, 'country') = 0) and (CompareText(section, 'config') = 0) then
+            begin
+              linetmp := Trim(Copy(line, 1, Pos('=', line)));
+              if (PageLang.Values[1]) then
+                FileLines[i] := linetmp+' 33,859';
+              if (PageLang.Values[2]) then
+                FileLines[i] := linetmp+' 49,850';
+              if (PageLang.Values[3]) then
+                FileLines[i] := linetmp+' 81,932';
+              if (PageLang.Values[4]) then
+                FileLines[i] := linetmp+' 82,949';
+              if (PageLang.Values[5]) then
+                FileLines[i] := linetmp+' 55,860';
+              if (PageLang.Values[6]) then
+                FileLines[i] := linetmp+' 86,936';
+              if (PageLang.Values[7]) then
+                FileLines[i] := linetmp+' 34,858';
+              if (PageLang.Values[8]) then
+                FileLines[i] := linetmp+' 886,950';
+              if (PageLang.Values[9]) then
+                FileLines[i] := linetmp+' 90,857';
+              break;
+            end
+          end
+        end;
+        FileLines.SaveToFile(ExpandConstant('{app}\dosbox-x.conf'));
+      end;
+end;
 procedure InitializeWizard();
 begin
     if not Is32BitInstaller() and not IsWin64 then
@@ -231,30 +350,33 @@ begin
     end;
     msg:='The selected build will be the default build when you run DOSBox-X from the Windows Start Menu or the desktop. DOSBox-X provides both SDL1 and SDL2 builds, and while SDL1 builds are preselected, you may prefer SDL2 builds if for example you encounter some issues with a non-U.S. keyboard layout in SDL1 builds. Please click the "Help" button below for more information about the DOSBox-X build selection.';
     PageBuild:=CreateInputOptionPage(wpSelectDir, 'Default DOSBox-X build (32-bit)', 'Select the default DOSBox-X build to run', msg, True, False);
-    PageBuild.Add('Release SDL1 (Default Visual Studio build)');
-    PageBuild.Add('Release SDL2 (Alternative Visual Studio build)');
-    PageBuild.Add('ARM Release SDL1 (ARM platform only)');
-    PageBuild.Add('ARM Release SDL2 (ARM platform only)');
-    PageBuild.Add('MinGW build SDL1 (Default MinGW build)');
-    PageBuild.Add('MinGW build SDL2 (Alternative MinGW build)');
+    PageBuild.AddEx('Visual Studio build (default release)', 0, True);
+    PageBuild.AddEx('Visual Studio build for ARM platform', 0, True);
     if Is32BitInstaller() then
-      PageBuild.Add('MinGW lowend build (SDL1 build on low-end systems)');
-    if IsX86 or IsX64 then
     begin
-      PageBuild.CheckListBox.ItemEnabled[2] := False;
+      PageBuild.AddEx('MinGW standard build (for newer systems)', 0, True);
+      PageBuild.AddEx('MinGW low-end build (for older systems)', 0, True);
+    end
+    else
+    begin
+      PageBuild.AddEx('MinGW standard build (alternative release)', 0, True);
+      PageBuild.AddEx('MinGW low-end build (32-bit only)', 0, True);
       PageBuild.CheckListBox.ItemEnabled[3] := False;
     end;
-    if not IsWindowsVersionOrNewer(6, 0) then
+    if IsX86 or IsX64 then
     begin
-      PageBuild.CheckListBox.ItemEnabled[4] := False;
-      PageBuild.CheckListBox.ItemEnabled[5] := False;
+      PageBuild.CheckListBox.ItemEnabled[1] := False;
     end;
+    if not IsWindowsVersionOrNewer(6, 0) then
+      PageBuild.CheckListBox.ItemEnabled[2] := False;
     if IsARM64 then
       begin
-        PageBuild.Values[2] := True;
+        PageBuild.Values[1] := True;
       end
     else
       PageBuild.Values[0] := True;
+    PageBuild.CheckListBox.AddGroup('Check the following box to select the SDL2 build as the default DOSBox-X build.', '', 0, nil);
+    PageBuild.CheckListBox.AddCheckBox('Default to SDL2 build (instead of SDL1 build) ', '', 0, False, True, False, True, nil);
     CreateHelpButton(ScaleX(20), WizardForm.CancelButton.Top, WizardForm.CancelButton.Width, WizardForm.CancelButton.Height);
     msg:='DOSBox-X supports different video output systems for different purposes.' #13#13 'By default it uses the Direct3D output, but you may want to select the OpenGL pixel-perfect scaling output for improved image quality (not available if you had selected an ARM build). Also, if you use text-mode DOS applications and/or the DOS shell frequently you probably want to select the TrueType font (TTF) output to make the text screen look much better by using scalable TrueType fonts.' #13#13 'This setting can be later modified in the DOSBox-X''s configuration file (dosbox-x.conf), or from DOSBox-X''s Video menu.';
     PageOutput:=CreateInputOptionPage(PageBuild.ID, 'Video output for DOSBox-X', 'Specify the DOSBox-X video output system', msg, True, False);
@@ -262,10 +384,11 @@ begin
     PageOutput.Add('OpenGL with pixel-perfect scaling');
     PageOutput.Add('TrueType font (TTF) / Direct3D output');
     PageOutput.Values[2] := True;
-    msg:='DOSBox-X supports language files to display messages in different languages. The user interface is English by default, but you can select a different language for its user interface. This setting can be later modified in the configuration file (dosbox-x.conf).';
-    PageLang:=CreateInputOptionPage(PageOutput.ID, 'User interface language', 'Select the language for DOSBox-X''s user interface', msg, True, False);
+    msg:='DOSBox-X supports language files to display messages in different languages. The language for the user interface and internal DOS is English by default, but you can select a different language for its user interface and internal DOS. The language and code page settings can be later modified in the configuration file (dosbox-x.conf).';
+    PageLang:=CreateInputOptionPage(PageOutput.ID, 'User interface and DOS language', 'Select the language for DOSBox-X''s user interface and internal DOS', msg, True, False);
     PageLang.Add('Default (English)');
-    PageLang.Add('French (français)');
+    PageLang.Add('French (Français)');
+    PageLang.Add('German (Deutsch)');
     PageLang.Add('Japanese (日本語)');
     PageLang.Add('Korean (한국어)');
     PageLang.Add('Portuguese (português do Brasil)');
@@ -274,6 +397,25 @@ begin
     PageLang.Add('Traditional Chinese (繁體/正體中文)');
     PageLang.Add('Turkish (Türkçe)');
     PageLang.Values[0] := True;
+    lang := ExpandConstant('{language}');
+    if lang = 'fr' then
+        PageLang.Values[1] := True;
+    if lang = 'ge' then
+        PageLang.Values[2] := True;
+    if lang = 'ja' then
+        PageLang.Values[3] := True;
+    if lang = 'ko' then
+        PageLang.Values[4] := True;
+    if lang = 'pt' then
+        PageLang.Values[5] := True;
+    if lang = 'sc' then
+        PageLang.Values[6] := True;
+    if lang = 'sp' then
+        PageLang.Values[7] := True;
+    if lang = 'tc' then
+        PageLang.Values[8] := True;
+    if lang = 'tr' then
+        PageLang.Values[9] := True;
     msg:='DOSBox-X allows you to select a TrueType font (or OpenType font) for the TrueType font (TTF) output. It has a builtin TTF font as the default font for the output, but you may want to select a different TTF (or TTC/OTF) font than the default one.' #13#13 'This setting can be later modified in the DOSBox-X''s configuration file (dosbox-x.conf).';
     PageFont:=CreateInputOptionPage(PageLang.ID, 'TrueType font', 'Select the font for the TrueType font output', msg, True, False);
     PageFont.Add('Default TrueType font');
@@ -297,8 +439,49 @@ begin
     PageVer.Add('DOS version 7.10 (for LFN and FAT32 support)');
 end;
 function ShouldSkipPage(PageID: Integer): Boolean;
+var
+  i: Integer;
+  defcp: Boolean;
+  line, linetmp, section: String;
+  FileLines: TStringList;
 begin
-  Result := ((PageID = PageOutput.ID) or (PageID = PageLang.ID) or (PageID = PageFont.ID) or (PageID = PageCustom.ID) or (PageID = PageVer.ID)) and FileExists(ExpandConstant('{app}\dosbox-x.conf')) or ((PageID = PageFont.ID) and (not PageOutput.Values[2] or PageLang.Values[2] or PageLang.Values[3] or PageLang.Values[5] or PageLang.Values[7])) or ((PageID = PageCustom.ID) and (not PageOutput.Values[2] or not PageFont.Values[5]));
+  if (PageID = PageLang.ID) then
+  begin
+    if FileExists(ExpandConstant('{app}\dosbox-x.conf')) then
+    begin
+      if (ExpandConstant('{language}') = 'en') or (WizardSetupType(False) = 'compact') then
+      begin
+        Result := True;
+        exit;
+      end;
+      FileLines := TStringList.Create;
+      FileLines.LoadFromFile(ExpandConstant('{app}\dosbox-x.conf'));
+      section := '';
+      defcp := False;
+      for i := 0 to FileLines.Count - 1 do
+      begin
+        line := Trim(FileLines[i]);
+        if (Length(line)>2) and (Copy(line, 1, 1) = '[') and (Copy(line, Length(line), 1) = ']') then
+          section := Copy(line, 2, Length(line)-2);
+        if (Length(line)>0) and (Copy(line, 1, 1) <> '#') and (Copy(line, 1, 1) <> '[') and (Pos('=', line) > 1) then
+        begin
+          linetmp := Trim(Copy(line, 1, Pos('=', line) - 1));
+          if (CompareText(linetmp, 'country') = 0) and (CompareText(section, 'config') = 0) then
+          begin
+            linetmp := Trim(Copy(line, Pos('=', line) + 1, Length(line)));
+            if (CompareText(linetmp, '') = 0) then
+              defcp := True;
+            break;
+          end;
+        end;
+      end;
+      Result := not defcp;
+    end
+    else
+      Result := False;
+  end
+  else
+    Result := ((PageID = PageOutput.ID) or (PageID = PageFont.ID) or (PageID = PageCustom.ID) or (PageID = PageVer.ID)) and FileExists(ExpandConstant('{app}\dosbox-x.conf')) or ((PageID = PageFont.ID) and (not PageOutput.Values[2] or PageLang.Values[3] or PageLang.Values[4] or PageLang.Values[6] or PageLang.Values[8])) or ((PageID = PageCustom.ID) and (not PageOutput.Values[2] or not PageFont.Values[5]));
 end;
 function NextButtonClick(CurPageID: Integer): Boolean;
 begin
@@ -331,21 +514,46 @@ begin
     Wizardform.ReadyMemo.Lines.Add('');
     Wizardform.ReadyMemo.Lines.Add('Default DOSBox-X build:');
     msg:='32-bit ';
-    if (PageBuild.Values[0]) then
-      msg:=msg+'Release SDL1';
-    if (PageBuild.Values[1]) then
-      msg:=msg+'Release SDL2';
-    if (PageBuild.Values[2]) then
-      msg:=msg+'ARM Release SDL1';
-    if (PageBuild.Values[3]) then
-      msg:=msg+'ARM Release SDL2';
-    if (PageBuild.Values[4]) then
-      msg:=msg+'MinGW build SDL1';
-    if (PageBuild.Values[5]) then
-      msg:=msg+'MinGW build SDL2';
-    if Is32BitInstaller() and (PageBuild.Values[6]) then
-      msg:=msg+'MinGW lowend build';
+    if (PageBuild.Values[0]) and (not PageBuild.Values[5]) then
+      msg:=msg+'Visual Studio build SDL1';
+    if (PageBuild.Values[0]) and (PageBuild.Values[5]) then
+      msg:=msg+'Visual Studio build SDL2';
+    if (PageBuild.Values[1]) and (not PageBuild.Values[5]) then
+      msg:=msg+'Visual Studio ARM build SDL1';
+    if (PageBuild.Values[1]) and (PageBuild.Values[5]) then
+      msg:=msg+'Visual Studio ARM build SDL2';
+    if (PageBuild.Values[2]) and (not PageBuild.Values[5]) then
+      msg:=msg+'MinGW standard build SDL1';
+    if (PageBuild.Values[2]) and (PageBuild.Values[5]) then
+      msg:=msg+'MinGW standard build SDL2';
+    if Is32BitInstaller() and (PageBuild.Values[3]) and (not PageBuild.Values[5]) then
+      msg:=msg+'MinGW low-end build SDL1';
+    if Is32BitInstaller() and (PageBuild.Values[3]) and (PageBuild.Values[5]) then
+      msg:=msg+'MinGW low-end build SDL2';
     Wizardform.ReadyMemo.Lines.Add('      '+msg);
+    lang:='';
+    if PageLang.Values[0] or PageLang.Values[1] or PageLang.Values[2] or PageLang.Values[3] or PageLang.Values[4] or PageLang.Values[5] or PageLang.Values[6] or PageLang.Values[7] or PageLang.Values[8] or PageLang.Values[9] then
+    begin
+      lang:='Default (English)';
+      if (PageLang.Values[1]) then
+        lang:='French (Français)';
+      if (PageLang.Values[2]) then
+        lang:='German (Deutsch)';
+      if (PageLang.Values[3]) then
+        lang:='Japanese (日本語)';
+      if (PageLang.Values[4]) then
+        lang:='Korean (한국어)';
+      if (PageLang.Values[5]) then
+        lang:='Portuguese (português do Brasil)';
+      if (PageLang.Values[6]) then
+        lang:='Simplified Chinese (简体中文)';
+      if (PageLang.Values[7]) then
+        lang:='Spanish (Español)';
+      if (PageLang.Values[8]) then
+        lang:='Traditional Chinese (繁體/正體中文)';
+      if (PageLang.Values[9]) then
+        lang:='Turkish (Türkçe)';
+    end;
     if not FileExists(ExpandConstant('{app}\dosbox-x.conf')) then
     begin
       if PageOutput.Values[0] or PageOutput.Values[1] or PageOutput.Values[2] then
@@ -359,28 +567,11 @@ begin
           msg:='TrueType font (TTF) / Direct3D output';
         Wizardform.ReadyMemo.Lines.Add('      '+msg);
       end;
-      if PageLang.Values[0] or PageLang.Values[1] or PageLang.Values[2] or PageLang.Values[3] or PageLang.Values[4] or PageLang.Values[5] or PageLang.Values[6] or PageLang.Values[7] or PageLang.Values[8] then
+      if Length(lang) > 0 then
       begin
         Wizardform.ReadyMemo.Lines.Add('');
-        Wizardform.ReadyMemo.Lines.Add('User interface language:');
-        msg:='Default (English)';
-        if (PageLang.Values[1]) then
-          msg:='French (français)';
-        if (PageLang.Values[2]) then
-          msg:='Japanese (日本語)';
-        if (PageLang.Values[3]) then
-          msg:='Korean (한국어)';
-        if (PageLang.Values[4]) then
-          msg:='Portuguese (português do Brasil)';
-        if (PageLang.Values[5]) then
-          msg:='Simplified Chinese (简体中文)';
-        if (PageLang.Values[6]) then
-          msg:='Spanish (Español)';
-        if (PageLang.Values[7]) then
-          msg:='Traditional Chinese (繁體/正體中文)';
-        if (PageLang.Values[8]) then
-          msg:='Turkish (Türkçe)';
-        Wizardform.ReadyMemo.Lines.Add('      '+msg);
+        Wizardform.ReadyMemo.Lines.Add('User interface and DOS language:');
+        Wizardform.ReadyMemo.Lines.Add('      '+lang);
       end;
       if PageFont.Values[0] or PageFont.Values[1] or PageFont.Values[2] or PageFont.Values[3] or PageFont.Values[4] or PageFont.Values[5] then
       begin
@@ -415,12 +606,18 @@ begin
         Wizardform.ReadyMemo.Lines.Add('      '+msg);
       end
     end
+    else if Length(lang) > 0 then
+    begin
+      Wizardform.ReadyMemo.Lines.Add('');
+      Wizardform.ReadyMemo.Lines.Add('User interface and DOS language:');
+      Wizardform.ReadyMemo.Lines.Add('      '+lang);
+    end
   end
 end;
 procedure CurStepChanged(CurrentStep: TSetupStep);
 var
   i, j, k, adv, res: Integer;
-  tsection, vsection, addcp, dosvcn, dosvtw, dosvset, found1, found2, found3, found4: Boolean;
+  tsection, vsection, addcp, dosvcn, dosvtw, dosvset, found1, found2, found3, found4, found5: Boolean;
   refname, section, line, linetmp, lineold, linenew, SetupType: String;
   FileLines, FileLinesold, FileLinesnew, FileLinesave: TStringList;
 begin
@@ -471,19 +668,25 @@ begin
             FileLines[i] := linetmp+' 3';
             found2 := True;
           end;
-          if not IsTaskSelected('drivedelay') and (CompareText(linetmp, 'hard drive data rate limit') = 0) and (CompareText(section, 'dos') = 0) then
+          if IsTaskSelected('centerwindow') and (CompareText(linetmp, 'windowposition') = 0) and (CompareText(section, 'sdl') = 0) then
           begin
             linetmp := Trim(Copy(line, 1, Pos('=', line)));
-            FileLines[i] := linetmp+' 0';
+            FileLines[i] := linetmp+' ';
             found3 := True;
           end;
-          if not IsTaskSelected('drivedelay') and (CompareText(linetmp, 'floppy drive data rate limit') = 0) and (CompareText(section, 'dos') = 0) then
+          if not IsTaskSelected('drivedelay') and (CompareText(linetmp, 'hard drive data rate limit') = 0) and (CompareText(section, 'dos') = 0) then
           begin
             linetmp := Trim(Copy(line, 1, Pos('=', line)));
             FileLines[i] := linetmp+' 0';
             found4 := True;
           end;
-          if found1 and found2 and ((found3 and found4) or IsTaskSelected('drivedelay')) then
+          if not IsTaskSelected('drivedelay') and (CompareText(linetmp, 'floppy drive data rate limit') = 0) and (CompareText(section, 'dos') = 0) then
+          begin
+            linetmp := Trim(Copy(line, 1, Pos('=', line)));
+            FileLines[i] := linetmp+' 0';
+            found5 := True;
+          end;
+          if found1 and found2 and (found3 or not IsTaskSelected('centerwindow')) and ((found4 and found5) or IsTaskSelected('drivedelay')) then
             break;
         end
       end;
@@ -523,21 +726,23 @@ begin
       begin
         if (not PageLang.Values[1]) and FileExists(ExpandConstant('{app}\languages\fr_FR.lng')) then
           DeleteFile(ExpandConstant('{app}\languages\fr_FR.lng'));
-        if (not PageLang.Values[2]) and FileExists(ExpandConstant('{app}\languages\ja_JP.lng')) then
+        if (not PageLang.Values[2]) and FileExists(ExpandConstant('{app}\languages\de_DE.lng')) then
+          DeleteFile(ExpandConstant('{app}\languages\de_DE.lng'));
+        if (not PageLang.Values[3]) and FileExists(ExpandConstant('{app}\languages\ja_JP.lng')) then
           DeleteFile(ExpandConstant('{app}\languages\ja_JP.lng'));
-        if (not PageLang.Values[3]) and FileExists(ExpandConstant('{app}\languages\ko_KR.lng')) then
+        if (not PageLang.Values[4]) and FileExists(ExpandConstant('{app}\languages\ko_KR.lng')) then
           DeleteFile(ExpandConstant('{app}\languages\ko_KR.lng'));
-        if (not PageLang.Values[4]) and FileExists(ExpandConstant('{app}\languages\pt_BR.lng')) then
+        if (not PageLang.Values[5]) and FileExists(ExpandConstant('{app}\languages\pt_BR.lng')) then
           DeleteFile(ExpandConstant('{app}\languages\pt_BR.lng'));
-        if (not PageLang.Values[5]) and FileExists(ExpandConstant('{app}\languages\zh_CN.lng')) then
+        if (not PageLang.Values[6]) and FileExists(ExpandConstant('{app}\languages\zh_CN.lng')) then
           DeleteFile(ExpandConstant('{app}\languages\zh_CN.lng'));
-        if (not PageLang.Values[6]) and FileExists(ExpandConstant('{app}\languages\es_ES.lng')) then
+        if (not PageLang.Values[7]) and FileExists(ExpandConstant('{app}\languages\es_ES.lng')) then
           DeleteFile(ExpandConstant('{app}\languages\es_ES.lng'));
-        if (not PageLang.Values[7]) and FileExists(ExpandConstant('{app}\languages\zh_TW.lng')) then
+        if (not PageLang.Values[8]) and FileExists(ExpandConstant('{app}\languages\zh_TW.lng')) then
           DeleteFile(ExpandConstant('{app}\languages\zh_TW.lng'));
-        if (not PageLang.Values[8]) and FileExists(ExpandConstant('{app}\languages\tr_TR.lng')) then
+        if (not PageLang.Values[9]) and FileExists(ExpandConstant('{app}\languages\tr_TR.lng')) then
           DeleteFile(ExpandConstant('{app}\languages\tr_TR.lng'));
-        if (not PageLang.Values[2]) and (not PageLang.Values[3]) and (not PageLang.Values[5]) and (not PageLang.Values[7]) and (not PageFont.Values[1]) then
+        if (not PageLang.Values[3]) and (not PageLang.Values[4]) and (not PageLang.Values[6]) and (not PageLang.Values[8]) and (not PageFont.Values[1]) then
         begin
           if FileExists(ExpandConstant('{app}\SarasaGothicFixed.ttf')) then
             DeleteFile(ExpandConstant('{app}\SarasaGothicFixed.ttf'));
@@ -548,64 +753,7 @@ begin
             DeleteFile(ExpandConstant('{app}\Nouveau_IBM.ttf'));
         end;
       end;
-      if FileExists(ExpandConstant('{app}\dosbox-x.conf')) and (PageLang.Values[1] or PageLang.Values[2] or PageLang.Values[3] or PageLang.Values[4] or PageLang.Values[5] or PageLang.Values[6] or PageLang.Values[7] or PageLang.Values[8]) then
-      begin
-        FileLines := TStringList.Create;
-        FileLines.LoadFromFile(ExpandConstant('{app}\dosbox-x.conf'));
-        section := '';
-        for i := 0 to FileLines.Count - 1 do
-        begin
-          line := Trim(FileLines[i]);
-          if (Length(line)>2) and (Copy(line, 1, 1) = '[') and (Copy(line, Length(line), 1) = ']') then
-            section := Copy(line, 2, Length(line)-2);
-          if (Length(line)>0) and (Copy(line, 1, 1) <> '#') and (Copy(line, 1, 1) <> '[') and (Pos('=', line) > 1) then
-          begin
-            linetmp := Trim(Copy(line, 1, Pos('=', line) - 1));
-            if (CompareText(linetmp, 'language') = 0) and (CompareText(section, 'dosbox') = 0) then
-            begin
-              linetmp := Trim(Copy(line, 1, Pos('=', line)));
-              if (PageLang.Values[1]) and FileExists(ExpandConstant('{app}\languages\fr_FR.lng')) then
-                FileLines[i] := linetmp+' fr_FR';
-              if (PageLang.Values[2]) and FileExists(ExpandConstant('{app}\languages\ja_JP.lng')) then
-                FileLines[i] := linetmp+' ja_JP';
-              if (PageLang.Values[3]) and FileExists(ExpandConstant('{app}\languages\ko_KR.lng')) then
-                FileLines[i] := linetmp+' ko_KR';
-              if (PageLang.Values[4]) and FileExists(ExpandConstant('{app}\languages\pt_BR.lng')) then
-                FileLines[i] := linetmp+' pt_BR';
-              if (PageLang.Values[5]) and FileExists(ExpandConstant('{app}\languages\zh_CN.lng')) then
-                FileLines[i] := linetmp+' zh_CN';
-              if (PageLang.Values[6]) and FileExists(ExpandConstant('{app}\languages\es_ES.lng')) then
-                FileLines[i] := linetmp+' es_ES';
-              if (PageLang.Values[7]) and FileExists(ExpandConstant('{app}\languages\zh_TW.lng')) then
-                FileLines[i] := linetmp+' zh_TW';
-              if (PageLang.Values[8]) and FileExists(ExpandConstant('{app}\languages\tr_TR.lng')) then
-                FileLines[i] := linetmp+' tr_TR';
-            end;
-            if (CompareText(linetmp, 'country') = 0) and (CompareText(section, 'config') = 0) then
-            begin
-              linetmp := Trim(Copy(line, 1, Pos('=', line)));
-              if (PageLang.Values[1]) then
-                FileLines[i] := linetmp+' 33,858';
-              if (PageLang.Values[2]) then
-                FileLines[i] := linetmp+' 81,932';
-              if (PageLang.Values[3]) then
-                FileLines[i] := linetmp+' 82,949';
-              if (PageLang.Values[4]) then
-                FileLines[i] := linetmp+' 55,860';
-              if (PageLang.Values[5]) then
-                FileLines[i] := linetmp+' 86,936';
-              if (PageLang.Values[6]) then
-                FileLines[i] := linetmp+' 34,858';
-              if (PageLang.Values[7]) then
-                FileLines[i] := linetmp+' 886,950';
-              if (PageLang.Values[8]) then
-                FileLines[i] := linetmp+' 90,857';
-              break;
-            end
-          end
-        end;
-        FileLines.SaveToFile(ExpandConstant('{app}\dosbox-x.conf'));
-      end;
+      SetLanguage();
       if FileExists(ExpandConstant('{app}\dosbox-x.conf')) and (PageFont.Values[1] or PageFont.Values[2] or PageFont.Values[3] or PageFont.Values[4] or PageFont.Values[5]) then
       begin
         FileLines := TStringList.Create;
@@ -880,6 +1028,19 @@ begin
                     continue;
                   end;
                 end;
+                if (CompareText(section, 'sdl') = 0) and (CompareText(Trim(linetmp), 'windowposition') = 0) then
+                begin
+                  if IsTaskSelected('centerwindow') and (Trim(Copy(lineold, Pos('=', lineold) + 1, Length(lineold))) = '-') then
+                  begin
+                    FileLinesave.add(linetmp + '= ');
+                    continue;
+                  end;
+                  if not IsTaskSelected('centerwindow') and ((Trim(Copy(lineold, Pos('=', lineold) + 1, Length(lineold))) = '') or (Trim(Copy(lineold, Pos('=', lineold) + 1, Length(lineold))) = ',')) then
+                  begin
+                    FileLinesave.add(linetmp + '= -');
+                    continue;
+                  end;
+                end;
                 if (CompareText(section, 'sdl') = 0) and (CompareText(Trim(linetmp), 'output') = 0) and (dosvcn or dosvtw) then
                 begin
                   FileLinesave.add(linetmp + '= ttf');
@@ -923,6 +1084,8 @@ begin
                 linenew := linetmp + '= 886,950';
               if (CompareText(Trim(linetmp), 'file access tries') = 0) then
                 linenew := Copy(Trim(linenew), 1, Length(Trim(linenew)) - 1) + '3';
+              if IsTaskSelected('centerwindow') and (CompareText(Trim(linetmp), 'windowposition') = 0) then
+                linenew := Copy(Trim(linenew), 1, Length(Trim(linenew)) - 2) + '';
               if not IsTaskSelected('drivedelay') and ((CompareText(Trim(linetmp), 'hard drive data rate limit') = 0) or (CompareText(Trim(linetmp), 'floppy drive data rate limit') = 0)) then
                 linenew := Copy(Trim(linenew), 1, Length(Trim(linenew)) - 2) + '0';
               FileLinesave.add(linenew);
@@ -933,7 +1096,8 @@ begin
         FileLinesold.free;
         FileLinesnew.free;
         DeleteFile(ExpandConstant('{app}\dosbox-x.conf.old'));
-      end
+      end;
+      SetLanguage();
     end;
     DeleteFile(ExpandConstant('{app}\dosbox-x.reference.setup.conf'));
   end
@@ -956,20 +1120,22 @@ var
   dir: string;
 begin
     dir:='Win32_builds\';
-    if (PageBuild.Values[0]) then
+    if (PageBuild.Values[0]) and (not PageBuild.Values[5]) then
       dir:=dir+'x86_Release';
-    if (PageBuild.Values[1]) then
+    if (PageBuild.Values[0]) and (PageBuild.Values[5]) then
       dir:=dir+'x86_Release_SDL2';
-    if (PageBuild.Values[2]) then
+    if (PageBuild.Values[1]) and (not PageBuild.Values[5]) then
       dir:=dir+'ARM_Release';
-    if (PageBuild.Values[3]) then
+    if (PageBuild.Values[1]) and (PageBuild.Values[5]) then
       dir:=dir+'ARM_Release_SDL2';
-    if (PageBuild.Values[4]) then
+    if (PageBuild.Values[2]) and (not PageBuild.Values[5]) then
       dir:=dir+'mingw';
-    if (PageBuild.Values[5]) then
+    if (PageBuild.Values[2]) and (PageBuild.Values[5]) then
       dir:=dir+'mingw-sdl2';
-    if Is32BitInstaller() and (PageBuild.Values[6]) then
+    if Is32BitInstaller() and (PageBuild.Values[3]) and (not PageBuild.Values[5]) then
       dir:=dir+'mingw-lowend';
+    if Is32BitInstaller() and (PageBuild.Values[3]) and (PageBuild.Values[5]) then
+      dir:=dir+'mingw-lowend-sdl2';
     Result := False;
     if (dir=name) then
       Result := True;

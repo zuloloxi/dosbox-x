@@ -16,6 +16,8 @@
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
  */
 
+#include <assert.h>
+
 #include "dosbox.h"
 #include "menu.h"
 #include "menudef.h"
@@ -42,17 +44,23 @@
 #ifdef MACOSX
 #include <CoreGraphics/CoreGraphics.h>
 #endif
+#include <sys/types.h>
+#include <sys/stat.h>
+
+#include <output/output_opengl.h>
+#include <output/output_ttf.h>
 
 int oldblinkc = -1;
 std::string savefilename = "";
 
 extern SHELL_Cmd cmd_list[];
 extern unsigned int page, hostkeyalt, sendkeymap;
-extern int posx, posy, wheel_key, mbutton, enablelfn, dos_clipboard_device_access, aspect_ratio_x, aspect_ratio_y;
-extern bool addovl, clearline, winrun, window_was_maximized, wheel_guest, clipboard_dosapi, clipboard_biospaste, direct_mouse_clipboard, sync_time, manualtime, pausewithinterrupts_enable, enable_autosave, enable_config_as_shell_commands, noremark_save_state, force_load_state, use_quick_reboot, use_save_file, dpi_aware_enable, pc98_force_ibm_layout, log_int21, log_fileio, x11_on_top, macosx_on_top, rtl, gbk, chinasea;
+extern int posx, posy, wheel_key, mbutton, enablelfn, dos_clipboard_device_access, aspect_ratio_x, aspect_ratio_y, disk_data_rate, floppy_data_rate, lastmsgcp;
+extern bool addovl, clearline, pcibus_enable, winrun, window_was_maximized, wheel_guest, clipboard_dosapi, clipboard_biospaste, direct_mouse_clipboard, sync_time, manualtime, pausewithinterrupts_enable, enable_autosave, enable_config_as_shell_commands, noremark_save_state, force_load_state, use_quick_reboot, use_save_file, dpi_aware_enable, pc98_force_ibm_layout, log_int21, log_fileio, x11_on_top, macosx_on_top, rtl, gbk, chinasea, uselangcp;
 extern bool mountfro[26], mountiro[26];
 extern struct BuiltinFileBlob bfb_GLIDE2X_OVL;
 extern const char* RunningProgram;
+extern bool video_debug_overlay;
 
 void MSG_Init(void);
 void SendKey(std::string key);
@@ -67,8 +75,9 @@ void VFILE_Remove(const char *name,const char *dir = "");
 void VOODOO_Destroy(Section* /*sec*/), VOODOO_OnPowerOn(Section* /*sec*/);
 void GLIDE_ShutDown(Section* sec), GLIDE_PowerOn(Section* sec);
 void DOSBox_ShowConsole(void);
+void Load_Language(std::string name);
 void RebootLanguage(std::string filename, bool confirm=false);
-void MenuBrowseFolder(char drive, std::string drive_type);
+void MenuBrowseFolder(char drive, std::string const& drive_type);
 void MenuBrowseImageFile(char drive, bool arc, bool boot, bool multiple);
 void MenuBootDrive(char drive);
 void MenuUnmountDrive(char drive);
@@ -81,12 +90,13 @@ void GFX_LosingFocus(void);
 void GFX_ReleaseMouse(void);
 void GFX_ForceRedrawScreen(void);
 bool GFX_GetPreventFullscreen(void);
-bool isDBCSCP(void), toOutput(const char *what);
+bool isDBCSCP(void), toOutput(const char *what), saveDiskImage(imageDisk *image, const char *name);
 bool systemmessagebox(char const * aTitle, char const * aMessage, char const * aDialogType, char const * aIconType, int aDefaultButton);
-int FileDirExistCP(const char *name), FileDirExistUTF8(std::string &localname, const char *name);
+int setTTFMap(bool changecp), FileDirExistCP(const char *name), FileDirExistUTF8(std::string &localname, const char *name);
 size_t GetGameState_Run(void);
 void DBCSSBCS_mapper_shortcut(bool pressed);
 void AutoBoxDraw_mapper_shortcut(bool pressed);
+extern std::string langname, GetDOSBoxXPath(bool withexe=false);
 
 void* GetSetSDLValue(int isget, std::string& target, void* setval) {
     if (target == "wait_on_error") {
@@ -445,6 +455,57 @@ bool drive_bootimg_menu_callback(DOSBoxMenu * const menu,DOSBoxMenu::item * cons
     return true;
 }
 
+bool drive_saveimg_menu_callback(DOSBoxMenu * const menu,DOSBoxMenu::item * const menuitem) {
+    (void)menu;//UNUSED
+    (void)menuitem;//UNUSED
+
+    int drive;
+    const char *mname = menuitem->get_name().c_str();
+    if (!strncmp(mname,"drive_",6))
+        drive = mname[6] - 'A';
+    else
+        return false;
+    if (drive < 0 || drive>=DOS_DRIVES) return false;
+    if (!Drives[drive] || dynamic_cast<fatDrive*>(Drives[drive])) {
+        systemmessagebox("Error", "Drive does not exist or is mounted from disk image.", "ok","error", 1);
+        return false;
+    }
+
+#if !defined(HX_DOS)
+    char CurrentDir[512];
+    char * Temp_CurrentDir = CurrentDir;
+    if(getcwd(Temp_CurrentDir, 512) == NULL) {
+        LOG(LOG_GUI, LOG_ERROR)("drive_saveimg_menu_callback failed to get the current working directory.");
+        return false;
+    }
+    std::string cwd = std::string(Temp_CurrentDir)+CROSS_FILESPLIT;
+    const char *lFilterPatterns[] =  {IS_PC98_ARCH?"*.hdi":"*.img",IS_PC98_ARCH?"*.HDI":"*.hdi"};
+    const char *lFilterDescription = IS_PC98_ARCH ? "Disk image (*.hdi)" : "Disk image (*.img)";
+    char const * lTheSaveFileName = tinyfd_saveFileDialog("Save image file...","",2,lFilterPatterns,lFilterDescription);
+    if (lTheSaveFileName==NULL) return false;
+
+    for (int i=0; i<MAX_DISK_IMAGES; i++)
+        if (imageDiskList[i] && imageDiskList[i]->ffdd && imageDiskList[i]->drvnum == drive) {
+            if (!saveDiskImage(imageDiskList[i], lTheSaveFileName)) systemmessagebox("Error", "Failed to save disk image.", "ok","error", 1);
+            chdir(Temp_CurrentDir);
+            return true;
+        }
+    if (dos_kernel_disabled || !strcmp(RunningProgram, "LOADLIN")) return false;
+    Section_prop *sec = static_cast<Section_prop *>(control->GetSection("dosbox"));
+    uint32_t freeMB = sec->Get_int("convert fat free space"), timeout = sec->Get_int("convert fat timeout");
+    imageDisk *imagedrv = new imageDisk(Drives[drive], drive, freeMB, timeout);
+    if (!saveDiskImage(imagedrv, lTheSaveFileName)) systemmessagebox("Error", "Failed to save disk image.", "ok","error", 1);
+    if (imagedrv) delete imagedrv;
+
+    if(chdir(Temp_CurrentDir) == -1) {
+        LOG(LOG_GUI, LOG_ERROR)("drive_saveimg_menu_callback failed to change directories.");
+        return false;
+    }
+#endif
+
+    return true;
+}
+
 bool drive_unmount_menu_callback(DOSBoxMenu * const menu,DOSBoxMenu::item * const menuitem) {
     (void)menu;//UNUSED
     (void)menuitem;//UNUSED
@@ -467,7 +528,7 @@ bool drive_unmount_menu_callback(DOSBoxMenu * const menu,DOSBoxMenu::item * cons
     return true;
 }
 
-void swapInDrive(int drive, int position=0);
+void swapInDrive(int drive, unsigned int position=0);
 bool drive_swap_menu_callback(DOSBoxMenu * const menu,DOSBoxMenu::item * const menuitem) {
     (void)menu;//UNUSED
     (void)menuitem;//UNUSED
@@ -583,6 +644,7 @@ const DOSBoxMenu::callback_t drive_callbacks[] = {
     NULL,
     drive_boot_menu_callback,
     drive_bootimg_menu_callback,
+    drive_saveimg_menu_callback,
     NULL
 };
 
@@ -598,7 +660,7 @@ bool a20gate_on_menu_callback(DOSBoxMenu * const menu,DOSBoxMenu::item * const m
         mainMenu.get_item("enable_a20gate").check(MEM_A20_Enabled()).refresh_item(mainMenu);
     else {
         std::string msg = "The A20 gate may be locked and cannot be "+std::string(bef?"disabled":"enabled")+".";
-        systemmessagebox("Warning",msg.c_str(),"ok", "info", 1);
+        systemmessagebox("Warning",msg.c_str(),"ok", "warning", 1);
     }
     return true;
 }
@@ -701,6 +763,7 @@ const char *drive_opts[][2] = {
     { "div3",                   "--" },
     { "boot",                   "Boot from drive" },
     { "bootimg",                "Boot from disk image" },
+    { "saveimg",                "Save to disk image" },
     { NULL, NULL }
 };
 
@@ -775,6 +838,39 @@ bool dos_ems_menu_callback(DOSBoxMenu * const menu,DOSBoxMenu::item * const menu
         EMS_Startup(NULL);
         update_dos_ems_menu();
     }
+    return true;
+}
+
+bool dos_hdd_rate_menu_callback(DOSBoxMenu * const menu,DOSBoxMenu::item * const menuitem) {
+    (void)menu;//UNUSED
+    (void)menuitem;//UNUSED
+
+    Section_prop * section = static_cast<Section_prop *>(control->GetSection("dos"));
+    if (disk_data_rate == 0) {
+        if (pcibus_enable)
+            disk_data_rate = 8333333; /* Probably an average IDE data rate for mid 1990s PCI IDE controllers in PIO mode */
+        else
+            disk_data_rate = 3500000; /* Probably an average IDE data rate for early 1990s ISA IDE controllers in PIO mode */
+    } else
+        disk_data_rate = 0;
+    std::string tmp = std::to_string(disk_data_rate);
+    SetVal("dos", "hard drive data rate limit", tmp);
+    mainMenu.get_item("limit_hdd_rate").check(disk_data_rate).refresh_item(mainMenu);
+    return true;
+}
+
+bool dos_floppy_rate_menu_callback(DOSBoxMenu * const menu,DOSBoxMenu::item * const menuitem) {
+    (void)menu;//UNUSED
+    (void)menuitem;//UNUSED
+
+    Section_prop * section = static_cast<Section_prop *>(control->GetSection("dos"));
+    if(floppy_data_rate == 0)
+        floppy_data_rate = 22400; // 175 kbps
+    else
+        floppy_data_rate = 0;
+    std::string tmp = std::to_string(floppy_data_rate);
+    SetVal("dos", "floppy drive data rate limit", tmp);
+    mainMenu.get_item("limit_floppy_rate").check(floppy_data_rate).refresh_item(mainMenu);
     return true;
 }
 
@@ -1385,10 +1481,28 @@ bool vid_select_glsl_shader_menu_callback(DOSBoxMenu* const menu, DOSBoxMenu::it
         LOG(LOG_GUI, LOG_ERROR)("vid_select_glsl_shader_menu_callback failed to get the current working directory.");
         return false;
     }
+    struct stat st;
     std::string cwd = std::string(Temp_CurrentDir)+CROSS_FILESPLIT+"glshaders"+CROSS_FILESPLIT;
+# if defined(MACOSX)
+    /* Hey, Mac OS! When I ask for files that end in *.glsl I expect your finder
+       to actually let users select files that end in *.glsl! What gives? 2022/06/29 */
+    int nFilterPatterns = 0;
+    const char **lFilterPatterns = NULL;
+    const char *lFilterDescription = NULL;
+# else
+    int nFilterPatterns = 2;
     const char *lFilterPatterns[] = {"*.glsl","*.GLSL"};
     const char *lFilterDescription = "OpenGL shader files (*.glsl)";
-    char const * lTheOpenFileName = tinyfd_openFileDialog("Select OpenGL shader",cwd.c_str(),2,lFilterPatterns,lFilterDescription,0);
+# endif
+
+    /* Mac OS Monterey: osascript will refuse to present any dialog box if the path does not exist.
+       Make sure we give it something that exists */
+    if (stat(cwd.c_str(),&st) != 0)
+        cwd = std::string(Temp_CurrentDir)+CROSS_FILESPLIT+"contrib/glshaders"+CROSS_FILESPLIT;
+    if (stat(cwd.c_str(),&st) != 0)
+        cwd = std::string(Temp_CurrentDir);
+
+    char const * lTheOpenFileName = tinyfd_openFileDialog("Select OpenGL shader",cwd.c_str(),nFilterPatterns,lFilterPatterns,lFilterDescription,0);
 
     if (lTheOpenFileName) {
         /* Windows will fill lpstrFile with the FULL PATH.
@@ -1486,6 +1600,7 @@ bool vid_select_ttf_font_menu_callback(DOSBoxMenu* const menu, DOSBoxMenu::item*
             else
                 SetVal("ttf", "font", name);
             ttf_reset();
+            if (!IS_PC98_ARCH) setTTFMap(false);
 #if C_PRINTER
             if (TTF_using() && printfont) UpdateDefaultPrinterFont();
 #endif
@@ -1733,15 +1848,24 @@ void Restart_config_file() {
 #endif
 }
 
-void Restart_language_file() {
+void Load_language_file() {
 #if !defined(HX_DOS)
     char CurrentDir[512];
     char * Temp_CurrentDir = CurrentDir;
     if(getcwd(Temp_CurrentDir, 512) == NULL) {
-        LOG(LOG_GUI, LOG_ERROR)("Restart_language_file failed to get the current working directory.");
+        LOG(LOG_GUI, LOG_ERROR)("Load_language_file failed to get the current working directory.");
         return;
     }
-    std::string cwd = std::string(Temp_CurrentDir)+CROSS_FILESPLIT;
+    struct stat st;
+    std::string res_path, exepath = GetDOSBoxXPath();
+    std::string cwd = std::string(Temp_CurrentDir)+CROSS_FILESPLIT+"languages"+CROSS_FILESPLIT;
+    Cross::GetPlatformResDir(res_path);
+    if (stat(cwd.c_str(),&st) != 0 && exepath.size())
+        cwd = exepath+(exepath.back()==CROSS_FILESPLIT?"":std::string(1, CROSS_FILESPLIT))+"languages"+CROSS_FILESPLIT;
+    if (stat(cwd.c_str(),&st) != 0 && res_path.size())
+        cwd = res_path+(res_path.back()==CROSS_FILESPLIT?"":std::string(1, CROSS_FILESPLIT))+"languages"+CROSS_FILESPLIT;
+    if (stat(cwd.c_str(),&st) != 0)
+        cwd = std::string(Temp_CurrentDir)+CROSS_FILESPLIT;
     const char *lFilterPatterns[] = {"*.lng","*.LNG","*.txt","*.TXT"};
     const char *lFilterDescription = "DOSBox-X language files (*.lng, *.txt)";
     char const * lTheOpenFileName = tinyfd_openFileDialog("Select language file",cwd.c_str(),4,lFilterPatterns,lFilterDescription,0);
@@ -1760,15 +1884,23 @@ void Restart_language_file() {
         }
 
         if (*name) {
-            std::string localname = name;
-            if (!FileDirExistCP(name) && FileDirExistUTF8(localname, name))
-                RebootLanguage(localname.c_str(), true);
-            else
-                RebootLanguage(name, true);
+            std::string localname = name, newname = !FileDirExistCP(name) && FileDirExistUTF8(localname, name) ? localname : name;
+            if (dos_kernel_disabled)
+                RebootLanguage(newname.c_str(), true);
+            else {
+                uselangcp = true;
+                SetVal("dosbox", "language", newname);
+                Load_Language(newname);
+                uselangcp = false;
+                if (lastmsgcp == dos.loaded_codepage && langname.size()) {
+                    std::string msg = "DOSBox-X has successfully loaded the following language:\n\n" + langname + " [code page " + std::to_string(lastmsgcp) + "]\n\nMessages from this language will be applied from this point.";
+                    systemmessagebox("DOSBox-X language file", msg.c_str(), "ok","info", 2);
+                }
+            }
         }
     }
     if(chdir(Temp_CurrentDir) == -1) {
-        LOG(LOG_GUI, LOG_ERROR)("Restart_language_file failed to change directories.");
+        LOG(LOG_GUI, LOG_ERROR)("Load_language_file failed to change directories.");
     }
 #endif
 }
@@ -1890,7 +2022,6 @@ bool aspect_ratio_edit_menu_callback(DOSBoxMenu * const menu,DOSBoxMenu::item * 
 bool vsync_menu_callback(DOSBoxMenu * const menu,DOSBoxMenu::item * const menuitem) {
     (void)menu;//UNUSED
     (void)menuitem;//UNUSED
-#if !defined(C_SDL2)
     const char *val = menuitem->get_name().c_str();
     if (!strncmp(val,"vsync_",6))
         val += 6;
@@ -1904,16 +2035,27 @@ bool vsync_menu_callback(DOSBoxMenu * const menu,DOSBoxMenu::item * const menuit
     VGA_Vsync VGA_Vsync_Decode(const char *vsyncmodestr);
     void VGA_VsyncUpdateMode(VGA_Vsync vsyncmode);
     VGA_VsyncUpdateMode(VGA_Vsync_Decode(val));
-#endif
     return true;
 }
 
 bool vsync_set_syncrate_menu_callback(DOSBoxMenu * const menu,DOSBoxMenu::item * const menuitem) {
     (void)menu;//UNUSED
     (void)menuitem;//UNUSED
-#if !defined(C_SDL2)
     GUI_Shortcut(17);
-#endif
+    return true;
+}
+
+bool set_titletext_menu_callback(DOSBoxMenu * const menu,DOSBoxMenu::item * const menuitem) {
+    (void)menu;//UNUSED
+    (void)menuitem;//UNUSED
+    GUI_Shortcut(21);
+    return true;
+}
+
+bool set_transparency_menu_callback(DOSBoxMenu * const menu,DOSBoxMenu::item * const menuitem) {
+    (void)menu;//UNUSED
+    (void)menuitem;//UNUSED
+    GUI_Shortcut(22);
     return true;
 }
 
@@ -1989,9 +2131,9 @@ bool intensity_menu_callback(DOSBoxMenu * const menu,DOSBoxMenu::item * const me
         reg_bl = 0;
     else
         reg_bl = 1;
-	reg_ax = 0x1003;
+    reg_ax = 0x1003;
     reg_bh = 0;
-	CALLBACK_RunRealInt(0x10);
+    CALLBACK_RunRealInt(0x10);
     reg_ax = oldax;
     reg_bx = oldbx;
     return true;
@@ -2170,15 +2312,64 @@ bool show_console_menu_callback(DOSBoxMenu * const menu,DOSBoxMenu::item * const
     if (DEBUG_IsDebuggerConsoleVisible())
         return true;
 #endif
-    HWND hwnd = GetConsoleWindow();
-    if (hwnd == NULL)
+    auto window = GetForegroundWindow();
+
+    auto console = GetConsoleWindow();
+
+    if (console == nullptr)
         DOSBox_ShowConsole();
-    else if (IsWindowVisible(hwnd))
-        ShowWindow(hwnd, SW_HIDE);
-    else
-        ShowWindow(hwnd, SW_SHOW);
-    mainMenu.get_item("show_console").check(IsWindowVisible(hwnd)).refresh_item(mainMenu);
+
+    auto visible = IsWindowVisible(console);
+
+    ShowWindow(console, visible ? SW_HIDE : SW_SHOW);
+
+    SetForegroundWindow(window);
+
+    if (console == nullptr)
+        console = GetConsoleWindow();
+
+    visible = IsWindowVisible(console);
+
+    mainMenu.get_item("show_console").check(visible).refresh_item(mainMenu);
+    mainMenu.get_item("clear_console").check(false).enable(visible).refresh_item(mainMenu);
 #endif
+    return true;
+}
+
+bool clear_console_menu_callback(DOSBoxMenu * const menu,DOSBoxMenu::item * const menuitem) {
+    (void)menu;//UNUSED
+    (void)menuitem;//UNUSED
+#if !defined(C_EMSCRIPTEN) && defined(WIN32) && !defined(HX_DOS)
+#if C_DEBUG
+    bool DEBUG_IsDebuggerConsoleVisible(void);
+    if (DEBUG_IsDebuggerConsoleVisible())
+        return true;
+#endif
+    const HANDLE handle = GetStdHandle(STD_OUTPUT_HANDLE);
+
+    constexpr COORD position = { 0, 0 };
+
+    DWORD written;
+
+    CONSOLE_SCREEN_BUFFER_INFO info;
+
+    if(!GetConsoleScreenBufferInfo(handle, &info))
+        return false;
+
+    const DWORD size = info.dwSize.X * info.dwSize.Y;
+
+    if(!FillConsoleOutputCharacter(handle, ' ', size, position, &written))
+        return false;
+
+    if(!GetConsoleScreenBufferInfo(handle, &info))
+        return false;
+
+    if(!FillConsoleOutputAttribute(handle, info.wAttributes, size, position, &written))
+        return false;
+
+    SetConsoleCursorPosition(handle, position);
+#endif
+    // TODO clear console on other platforms
     return true;
 }
 
@@ -2189,7 +2380,7 @@ bool save_logas_menu_callback(DOSBoxMenu * const menu,DOSBoxMenu::item * const m
     char CurrentDir[512];
     char * Temp_CurrentDir = CurrentDir;
     if(getcwd(Temp_CurrentDir, 512) == NULL) {
-        LOG(LOG_GUI, LOG_ERROR)("Restart_config_file failed to get the current working directory.");
+        LOG(LOG_GUI, LOG_ERROR)("save_logas_menu_callback failed to get the current working directory.");
         return false;
     }
     std::string cwd = std::string(Temp_CurrentDir)+CROSS_FILESPLIT;
@@ -2212,14 +2403,26 @@ bool save_logas_menu_callback(DOSBoxMenu * const menu,DOSBoxMenu::item * const m
 bool show_logtext_menu_callback(DOSBoxMenu * const menu,DOSBoxMenu::item * const menuitem) {
     (void)menu;//UNUSED
     (void)menuitem;//UNUSED
-    GUI_Shortcut(21);
+    GUI_Shortcut(43);
     return true;
 }
 
 bool show_codetext_menu_callback(DOSBoxMenu * const menu,DOSBoxMenu::item * const menuitem) {
     (void)menu;//UNUSED
     (void)menuitem;//UNUSED
-    GUI_Shortcut(22);
+    GUI_Shortcut(44);
+    return true;
+}
+
+bool video_debug_callback(DOSBoxMenu * const menu, DOSBoxMenu::item * const menuitem) {
+    (void)menu;//UNUSED
+    (void)menuitem;//UNUSED
+    video_debug_overlay = !video_debug_overlay;
+    mainMenu.get_item("video_debug_overlay").check(video_debug_overlay).refresh_item(mainMenu);
+
+    if (!vga.draw.vga_override)
+        RENDER_SetSize(vga.draw.width,vga.draw.height,render.src.bpp,render.src.fps,render.src.scrn_ratio);
+
     return true;
 }
 
@@ -2658,10 +2861,10 @@ bool restartconf_menu_callback(DOSBoxMenu * const xmenu, DOSBoxMenu::item * cons
     return true;
 }
 
-bool restartlang_menu_callback(DOSBoxMenu * const xmenu, DOSBoxMenu::item * const menuitem) {
+bool loadlang_menu_callback(DOSBoxMenu * const xmenu, DOSBoxMenu::item * const menuitem) {
     (void)xmenu;//UNUSED
     (void)menuitem;//UNUSED
-    Restart_language_file();
+    Load_language_file();
     return true;
 }
 
@@ -2681,7 +2884,10 @@ void toggle_always_on_top(void) {
     bool cur = is_always_on_top();
 #if defined(_WIN32) && !defined(C_SDL2) && defined(SDL_DOSBOX_X_SPECIAL)
     sdl1_hax_set_topmost(!cur);
-#elif defined(MACOSX) && !defined(C_SDL2) && defined(SDL_DOSBOX_X_SPECIAL)
+#elif defined(_WIN32)
+    SetWindowPos(GetHWND(), cur?HWND_NOTOPMOST:HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
+#elif defined(MACOSX) && (defined(C_SDL2) || defined(SDL_DOSBOX_X_SPECIAL))
+    void sdl1_hax_set_topmost(unsigned char topmost);
     sdl1_hax_set_topmost(macosx_on_top = (!cur));
 #elif defined(LINUX)
     void LinuxX11_OnTop(bool f);
@@ -2953,7 +3159,13 @@ void AllocCallback1() {
                         set_callback_function(scaler_set_menu_callback);
                 }
 
-                mainMenu.alloc_item(DOSBoxMenu::item_type_id,"refresh_rate").set_text("Refresh rate...").
+                mainMenu.alloc_item(DOSBoxMenu::item_type_id,"set_titletext").set_text("Set title bar text...").
+                    set_callback_function(set_titletext_menu_callback);
+
+                mainMenu.alloc_item(DOSBoxMenu::item_type_id,"set_transparency").set_text("Set transparency...").
+                    set_callback_function(set_transparency_menu_callback);
+
+                mainMenu.alloc_item(DOSBoxMenu::item_type_id,"refresh_rate").set_text("Adjust refresh rate...").
                     set_callback_function(refresh_rate_menu_callback);
             }
             {
@@ -2972,6 +3184,10 @@ void AllocCallback1() {
                     set_callback_function(output_menu_callback);
 #if defined(USE_TTF)
                 mainMenu.alloc_item(DOSBoxMenu::item_type_id,"output_ttf").set_text("TrueType font").
+                    set_callback_function(output_menu_callback);
+#endif
+#if C_GAMELINK
+                mainMenu.alloc_item(DOSBoxMenu::item_type_id,"output_gamelink").set_text("Game Link").
                     set_callback_function(output_menu_callback);
 #endif
                 mainMenu.alloc_item(DOSBoxMenu::item_type_id,"doublescan").set_text("Doublescan").
@@ -3231,6 +3447,18 @@ void AllocCallback1() {
                 }
             }
 
+            {
+                DOSBoxMenu::item &item = mainMenu.alloc_item(DOSBoxMenu::submenu_type_id,"DOSDiskRateMenu");
+                item.set_text("Limit disk transfer speed");
+
+                {
+                    mainMenu.alloc_item(DOSBoxMenu::item_type_id,"limit_hdd_rate").set_text("Limit hard disk data rate").
+                        set_callback_function(dos_hdd_rate_menu_callback);
+                    mainMenu.alloc_item(DOSBoxMenu::item_type_id,"limit_floppy_rate").set_text("Limit floppy disk data rate").
+                        set_callback_function(dos_floppy_rate_menu_callback);
+                }
+            }
+
 #if defined(WIN32) && !defined(HX_DOS) || defined(LINUX) || defined(MACOSX)
             {
                 DOSBoxMenu::item &item = mainMenu.alloc_item(DOSBoxMenu::submenu_type_id,"DOSWinMenu");
@@ -3370,6 +3598,7 @@ void AllocCallback1() {
                     set_callback_function(help_about_callback);
 #if !defined(C_EMSCRIPTEN)
                 mainMenu.alloc_item(DOSBoxMenu::item_type_id,"show_console").set_text("Show logging console").set_callback_function(show_console_menu_callback);
+                mainMenu.alloc_item(DOSBoxMenu::item_type_id,"clear_console").set_text("Clear logging console").set_callback_function(clear_console_menu_callback);
                 mainMenu.alloc_item(DOSBoxMenu::item_type_id,"disable_logging").set_text("Disable logging output").set_callback_function(disable_log_menu_callback).check(control->opt_nolog);
                 mainMenu.alloc_item(DOSBoxMenu::item_type_id,"wait_on_error").set_text("Console wait on error").set_callback_function(wait_on_error_menu_callback).check(sdl.wait_on_error);
 #endif
@@ -3383,6 +3612,7 @@ void AllocCallback1() {
                 mainMenu.alloc_item(DOSBoxMenu::item_type_id,"debugger_runnormal").set_text("Debugger option: Run normal").set_callback_function(debugger_runnormal_menu_callback).check(debugrunmode==1);
                 mainMenu.alloc_item(DOSBoxMenu::item_type_id,"debugger_runwatch").set_text("Debugger option: Run watch").set_callback_function(debugger_runwatch_menu_callback).check(debugrunmode==2);
 #endif
+                mainMenu.alloc_item(DOSBoxMenu::item_type_id,"video_debug_overlay").set_text("Video debug overlay").set_callback_function(video_debug_callback).check(video_debug_overlay);
             }
 
             {
@@ -3437,7 +3667,7 @@ void AllocCallback2() {
         mainMenu.alloc_item(DOSBoxMenu::item_type_id,"showdetails").set_text("Show FPS and RT speed in title bar").set_callback_function(showdetails_menu_callback).check(!menu.hidecycles && menu.showrt);
         mainMenu.alloc_item(DOSBoxMenu::item_type_id,"restartinst").set_text("Restart DOSBox-X instance").set_callback_function(restartinst_menu_callback);
         mainMenu.alloc_item(DOSBoxMenu::item_type_id,"restartconf").set_text("Restart DOSBox-X with config file...").set_callback_function(restartconf_menu_callback);
-        mainMenu.alloc_item(DOSBoxMenu::item_type_id,"restartlang").set_text("Restart DOSBox-X with language file...").set_callback_function(restartlang_menu_callback);
+        mainMenu.alloc_item(DOSBoxMenu::item_type_id,"loadlang").set_text("Load language file...").set_callback_function(loadlang_menu_callback);
         mainMenu.alloc_item(DOSBoxMenu::item_type_id,"auto_lock_mouse").set_text("Autolock mouse").set_callback_function(autolock_mouse_menu_callback).check(sdl.mouse.autoenable);
 #if defined (WIN32) || defined(MACOSX) || defined(C_SDL2)
         mainMenu.alloc_item(DOSBoxMenu::item_type_id,"clipboard_right").set_text("Via right mouse button").set_callback_function(right_mouse_clipboard_menu_callback).check(mbutton==3);
@@ -3474,7 +3704,7 @@ void AllocCallback2() {
         mainMenu.alloc_item(DOSBoxMenu::item_type_id,"wheel_ctrlpageupdown").set_text("Convert to Ctrl+PgUp/PgDn keys").set_callback_function(wheel_move_menu_callback);
         mainMenu.alloc_item(DOSBoxMenu::item_type_id,"wheel_ctrlwz").set_text("Convert to Ctrl+W/Z keys").set_callback_function(wheel_move_menu_callback);
         mainMenu.alloc_item(DOSBoxMenu::item_type_id,"wheel_guest").set_text("Enable for guest systems also").set_callback_function(wheel_guest_menu_callback);
-        mainMenu.alloc_item(DOSBoxMenu::item_type_id,"doublebuf").set_text("Double Buffering (Fullscreen)").set_callback_function(doublebuf_menu_callback).check(!!GetSetSDLValue(1, doubleBufString, 0));
+        mainMenu.alloc_item(DOSBoxMenu::item_type_id,"doublebuf").set_text("Double buffering (fullscreen)").set_callback_function(doublebuf_menu_callback).check(!!GetSetSDLValue(1, doubleBufString, 0));
         mainMenu.alloc_item(DOSBoxMenu::item_type_id,"alwaysontop").set_text("Always on top").set_callback_function(alwaysontop_menu_callback).check(is_always_on_top());
         mainMenu.alloc_item(DOSBoxMenu::item_type_id,"highdpienable").set_text("High DPI enable").set_callback_function(highdpienable_menu_callback).check(dpi_aware_enable);
         mainMenu.alloc_item(DOSBoxMenu::item_type_id,"sync_host_datetime").set_text("Synchronize host date/time").set_callback_function(sync_host_datetime_menu_callback).check(sync_time);

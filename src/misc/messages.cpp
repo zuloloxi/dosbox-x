@@ -27,19 +27,28 @@
 #include "setup.h"
 #include "render.h"
 #include "control.h"
+#include "shell.h"
 #include "menu.h"
 #include "jfont.h"
+#include "mapper.h"
 #include <map>
 #include <list>
 #include <string>
+#if defined(__MINGW32__) && !defined(HX_DOS)
+#include <imm.h>
+#endif
 using namespace std;
 
-extern bool dos_kernel_disabled, force_conversion, showdbcs, dbcs_sbcs;
-int msgcodepage = 0, FileDirExistUTF8(std::string &localname, const char *name);
-bool morelen = false, inmsg = false, loadlang = false, systemmessagebox(char const * aTitle, char const * aMessage, char const * aDialogType, char const * aIconType, int aDefaultButton);
-bool isSupportedCP(int newCP), CodePageHostToGuestUTF8(char *d/*CROSS_LEN*/,const char *s/*CROSS_LEN*/), CodePageGuestToHostUTF8(char *d/*CROSS_LEN*/,const char *s/*CROSS_LEN*/);
-void InitFontHandle(void), ShutFontHandle(void), menu_update_dynamic(void), menu_update_autocycle(void), update_bindbutton_text(void), set_eventbutton_text(const char *eventname, const char *buttonname), JFONT_Init();
+int msgcodepage = 0, lastmsgcp = 0;
+bool morelen = false, inmsg = false, loadlang = false, uselangcp = false;
+bool isSupportedCP(int newCP), CodePageHostToGuestUTF8(char *d/*CROSS_LEN*/,const char *s/*CROSS_LEN*/), CodePageGuestToHostUTF8(char *d/*CROSS_LEN*/,const char *s/*CROSS_LEN*/), systemmessagebox(char const * aTitle, char const * aMessage, char const * aDialogType, char const * aIconType, int aDefaultButton), OpenGL_using(void);
+void InitFontHandle(void), ShutFontHandle(void), refreshExtChar(void), SetIME(void), runRescan(const char *str), menu_update_dynamic(void), menu_update_autocycle(void), update_bindbutton_text(void), set_eventbutton_text(const char *eventname, const char *buttonname), JFONT_Init(), DOSBox_SetSysMenu(), UpdateSDLDrawTexture(), makestdcp950table(), makeseacp951table();
 std::string langname = "", langnote = "", GetDOSBoxXPath(bool withexe=false);
+extern Bitu DOS_LoadKeyboardLayout(const char * layoutname, int32_t codepage, const char * codepagefile);
+extern int lastcp, FileDirExistUTF8(std::string &localname, const char *name), toSetCodePage(DOS_Shell *shell, int newCP, int opt);
+extern bool dos_kernel_disabled, force_conversion, showdbcs, dbcs_sbcs, enableime, tonoime, chinasea;
+extern uint16_t GetDefaultCP();
+extern const char * RunningProgram;
 
 #define LINE_IN_MAXLEN 2048
 
@@ -79,7 +88,7 @@ void MSG_Replace(const char * _name, const char* _val) {
 
 bool InitCodePage() {
     if (!dos.loaded_codepage || dos_kernel_disabled || force_conversion) {
-        if (control->opt_langcp && msgcodepage>0 && isSupportedCP(msgcodepage) && msgcodepage != dos.loaded_codepage) {
+        if (((control->opt_langcp && msgcodepage != dos.loaded_codepage) || uselangcp) && msgcodepage>0 && isSupportedCP(msgcodepage)) {
             dos.loaded_codepage = msgcodepage;
             return true;
         }
@@ -100,7 +109,7 @@ bool InitCodePage() {
         }
     }
     if (!dos.loaded_codepage) {
-        dos.loaded_codepage = IS_PC98_ARCH||IS_JEGA_ARCH||IS_JDOSV?932:(IS_PDOSV?936:(IS_KDOSV?949:(IS_TDOSV?950:437)));
+        dos.loaded_codepage = GetDefaultCP();
         return false;
     } else
         return true;
@@ -185,10 +194,8 @@ void AddMessages() {
     MSG_Add("SWAP_SLOT","Swap slot");
     MSG_Add("EMPTY_SLOT","Empty slot");
     MSG_Add("SLOT","Slot");
-    MSG_Add("PREVIOUS_PAGE","< Previous Page");
-    MSG_Add("NEXT_PAGE","    Next Page >");
     MSG_Add("SELECT_EVENT", "Select an event to change.");
-    MSG_Add("SELECT_DIFFERENT_EVENT", "Select a different event or hit the Add/Del/Next buttons.");
+    MSG_Add("SELECT_DIFFERENT_EVENT", "Select an event or press Add/Del/Next buttons.");
     MSG_Add("PRESS_JOYSTICK_KEY", "Press a key/joystick button or move the joystick.");
     MSG_Add("CAPTURE_ENABLED", "Capture enabled. Hit ESC to release capture.");
     MSG_Add("MAPPER_FILE_SAVED", "Mapper file saved");
@@ -197,36 +204,71 @@ void AddMessages() {
     MSG_Add("AUTO_CYCLE_OFF","Auto cycles [off]");
 }
 
-void LoadMessageFile(const char * fname) {
-	if (!fname) return;
-	if(*fname=='\0') return;//empty string=no languagefile
+void SetKEYBCP() {
+    if (IS_PC98_ARCH || IS_JEGA_ARCH || IS_DOSV || dos_kernel_disabled || !strcmp(RunningProgram, "LOADLIN")) return;
+    if (msgcodepage == 437) {dos.loaded_codepage=0;DOS_LoadKeyboardLayout("us", 437, "auto");dos.loaded_codepage=437;}
+    else if (msgcodepage == 850) {dos.loaded_codepage=437;DOS_LoadKeyboardLayout("de", 850, "auto");dos.loaded_codepage=850;}
+    else if (msgcodepage == 857) {dos.loaded_codepage=437;DOS_LoadKeyboardLayout("tr", 857, "auto");dos.loaded_codepage=857;}
+    else if (msgcodepage == 858) {dos.loaded_codepage=437;DOS_LoadKeyboardLayout("es", 858, "auto");dos.loaded_codepage=858;}
+    else if (msgcodepage == 859) {dos.loaded_codepage=437;DOS_LoadKeyboardLayout("fr", 859, "auto");dos.loaded_codepage=859;}
+    else if (msgcodepage == 860) {dos.loaded_codepage=437;DOS_LoadKeyboardLayout("br", 860, "auto");dos.loaded_codepage=860;}
+    else if (msgcodepage == 932) {dos.loaded_codepage=437;DOS_LoadKeyboardLayout("jp", 932, "auto");dos.loaded_codepage=932;}
+    else if (msgcodepage == 936) {dos.loaded_codepage=0;DOS_LoadKeyboardLayout("us", 437, "auto");DOS_LoadKeyboardLayout("cn", 936, "auto");dos.loaded_codepage=936;}
+    else if (msgcodepage == 949) {dos.loaded_codepage=0;DOS_LoadKeyboardLayout("us", 437, "auto");DOS_LoadKeyboardLayout("ko", 949, "auto");dos.loaded_codepage=949;}
+    else if (msgcodepage == 950) {dos.loaded_codepage=0;DOS_LoadKeyboardLayout("us", 437, "auto");DOS_LoadKeyboardLayout("tw", 950, "auto");dos.loaded_codepage=950;}
+    else if (msgcodepage == 951) {dos.loaded_codepage=0;DOS_LoadKeyboardLayout("us", 437, "auto");DOS_LoadKeyboardLayout("hk", 951, "auto");dos.loaded_codepage=951;}
+    runRescan("-A -Q");
+}
 
-	LOG(LOG_MISC,LOG_DEBUG)("Loading message file %s",fname);
-    std::string config_path, exepath=GetDOSBoxXPath();
-    Cross::GetPlatformConfigDir(config_path);
-
+FILE *testLoadLangFile(const char *fname) {
+    std::string config_path, res_path, exepath=GetDOSBoxXPath();
+    Cross::GetPlatformConfigDir(config_path), Cross::GetPlatformResDir(res_path);
 	FILE * mfile=fopen(fname,"rt");
 	if (!mfile) mfile=fopen((fname + std::string(".lng")).c_str(),"rt");
 	if (!mfile && exepath.size()) mfile=fopen((exepath + fname).c_str(),"rt");
 	if (!mfile && exepath.size()) mfile=fopen((exepath + fname + ".lng").c_str(),"rt");
 	if (!mfile && config_path.size()) mfile=fopen((config_path + fname).c_str(),"rt");
 	if (!mfile && config_path.size()) mfile=fopen((config_path + fname + ".lng").c_str(),"rt");
+	if (!mfile && res_path.size()) mfile=fopen((res_path + fname).c_str(),"rt");
+	if (!mfile && res_path.size()) mfile=fopen((res_path + fname + ".lng").c_str(),"rt");
 	if (!mfile) mfile=fopen((std::string("languages/") + fname).c_str(),"rt");
 	if (!mfile) mfile=fopen((std::string("languages/") + fname + ".lng").c_str(),"rt");
 	if (!mfile && exepath.size()) mfile=fopen((exepath + "languages/" + fname).c_str(),"rt");
 	if (!mfile && exepath.size()) mfile=fopen((exepath + "languages/" + fname + ".lng").c_str(),"rt");
 	if (!mfile && config_path.size()) mfile=fopen((config_path + "languages/" + fname).c_str(),"rt");
 	if (!mfile && config_path.size()) mfile=fopen((config_path + "languages/" + fname + ".lng").c_str(),"rt");
+	if (!mfile && res_path.size()) mfile=fopen((res_path + "languages/" + fname).c_str(),"rt");
+	if (!mfile && res_path.size()) mfile=fopen((res_path + "languages/" + fname + ".lng").c_str(),"rt");
+	if (!mfile) mfile=fopen((std::string("language/") + fname).c_str(),"rt");
+	if (!mfile) mfile=fopen((std::string("language/") + fname + ".lng").c_str(),"rt");
+	if (!mfile && exepath.size()) mfile=fopen((exepath + "language/" + fname).c_str(),"rt");
+	if (!mfile && exepath.size()) mfile=fopen((exepath + "language/" + fname + ".lng").c_str(),"rt");
+	if (!mfile && config_path.size()) mfile=fopen((config_path + "language/" + fname).c_str(),"rt");
+	if (!mfile && config_path.size()) mfile=fopen((config_path + "language/" + fname + ".lng").c_str(),"rt");
+	if (!mfile && res_path.size()) mfile=fopen((res_path + "language/" + fname).c_str(),"rt");
+	if (!mfile && res_path.size()) mfile=fopen((res_path + "language/" + fname + ".lng").c_str(),"rt");
 #if defined(WIN32) && defined(C_SDL2)
     std::string localname = fname;
     if (!mfile && FileDirExistUTF8(localname, fname) == 1) mfile=fopen(localname.c_str(),"rt");
 #endif
+    return mfile;
+}
 
+void LoadMessageFile(const char * fname) {
+	if (!fname) return;
+	if(*fname=='\0') return;//empty string=no languagefile
+
+	LOG(LOG_MISC,LOG_DEBUG)("Loading message file %s",fname);
+
+	lastmsgcp = 0;
+	FILE * mfile=testLoadLangFile(fname);
 	/* This should never happen and since other modules depend on this use a normal printf */
 	if (!mfile) {
 		std::string message="Could not load language message file '"+std::string(fname)+"'. The default language will be used.";
 		systemmessagebox("Warning", message.c_str(), "ok","warning", 1);
+		SetVal("dosbox", "language", "");
 		LOG_MSG("MSG:Cannot load language file: %s",fname);
+		control->opt_lang = "";
 		return;
 	}
     msgcodepage = 0;
@@ -264,15 +306,20 @@ void LoadMessageFile(const char * fname) {
                     *r=0;
                     if (!strcmp(p, "CODEPAGE")) {
                         int c = atoi(r+1);
-                        if ((!res || control->opt_langcp) && c>0 && isSupportedCP(c)) {
+                        if ((!res || control->opt_langcp || uselangcp) && c>0 && isSupportedCP(c)) {
                             if (((IS_PC98_ARCH||IS_JEGA_ARCH) && c!=437 && c!=932 && !systemmessagebox("DOSBox-X language file", "You have specified a language file which uses a code page incompatible with the Japanese PC-98 or JEGA/AX system.\n\nAre you sure to use the language file for this machine type?", "yesno","question", 2)) || (((IS_JDOSV && c!=932) || (IS_PDOSV && c!=936) || (IS_KDOSV && c!=949) || (IS_TDOSV && c!=950 && c!=951)) && c!=437 && !systemmessagebox("DOSBox-X language file", "You have specified a language file which uses a code page incompatible with the current DOS/V system.\n\nAre you sure to use the language file for this system type?", "yesno","question", 2))) {
                                 fclose(mfile);
                                 dos.loaded_codepage = cp;
                                 return;
                             }
+                            std::string msg = "The specified language file uses code page " + std::to_string(c) + ". Do you want to change to this code page accordingly?";
+                            if (!control->opt_langcp && !uselangcp && c != 437 && GetDefaultCP() == 437 && systemmessagebox("DOSBox-X language file", msg.c_str(), "yesno", "question", 1)) control->opt_langcp = true;
                             msgcodepage = c;
                             dos.loaded_codepage = c;
+                            if (c == 950 && !chinasea) makestdcp950table();
+                            if (c == 951 && chinasea) makeseacp951table();
                         }
+                        lastmsgcp = c;
                     } else if (!strcmp(p, "LANGUAGE"))
                         langname = r+1;
                     else if (!strcmp(p, "REMARK"))
@@ -326,7 +373,7 @@ void LoadMessageFile(const char * fname) {
     menu_update_autocycle();
     update_bindbutton_text();
     dos.loaded_codepage=cp;
-    if (control->opt_langcp && msgcodepage>0 && isSupportedCP(msgcodepage) && msgcodepage != dos.loaded_codepage) {
+    if ((control->opt_langcp || uselangcp) && msgcodepage>0 && isSupportedCP(msgcodepage) && msgcodepage != dos.loaded_codepage) {
         ShutFontHandle();
         if (msgcodepage == 932 || msgcodepage == 936 || msgcodepage == 949 || msgcodepage == 950 || msgcodepage == 951) {
             dos.loaded_codepage = msgcodepage;
@@ -334,8 +381,23 @@ void LoadMessageFile(const char * fname) {
             JFONT_Init();
             dos.loaded_codepage = cp;
         }
+        if (uselangcp && !IS_DOSV && !IS_JEGA_ARCH) {
+#if defined(USE_TTF)
+            if (ttf.inUse) toSetCodePage(NULL, msgcodepage, -2); else
+#endif
+            {
+                dos.loaded_codepage = msgcodepage;
+                DOSBox_SetSysMenu();
+#if C_OPENGL && DOSBOXMENU_TYPE == DOSBOXMENU_SDLDRAW
+                if (OpenGL_using() && control->opt_lang.size() && lastcp && lastcp != dos.loaded_codepage)
+                    UpdateSDLDrawTexture();
+#endif
+            }
+            SetKEYBCP();
+        }
     }
 
+    refreshExtChar();
     LOG_MSG("Loaded language file: %s",fname);
 	loadlang=true;
 }
@@ -381,7 +443,7 @@ bool MSG_Write(const char * location, const char * name) {
                 fprintf(out,":MENU:%s\n%s\n.\n",idname.c_str(),temp);
         }
 	}
-    std::map<std::string,std::string> get_event_map(), event_map = get_event_map();
+    std::map<std::string,std::string> event_map = get_event_map();
     for (auto it=event_map.begin();it!=event_map.end();++it) {
         if (mainMenu.item_exists("mapper_"+it->first) && mainMenu.get_item("mapper_"+it->first).get_text() == it->second) continue;
         if (!CodePageGuestToHostUTF8(temp,it->second.c_str()))
@@ -411,7 +473,20 @@ void MSG_Init() {
                 if (strlen(countrystr)>10) countrystr[0] = 0;
                 sprintf(cstr, "%s,%d", countrystr, msgcodepage);
                 SetVal("config", "country", cstr);
+                const char *imestr = section->Get_string("ime");
+                if (tonoime && !strcasecmp(imestr, "auto") && (msgcodepage == 932 || msgcodepage == 936 || msgcodepage == 949 || msgcodepage == 950 || msgcodepage == 951)) {
+                    tonoime = false;
+                    enableime = true;
+                    SetIME();
+                }
             }
+        }
+        if (tonoime) {
+            tonoime = enableime = false;
+#if defined(WIN32) && !defined(HX_DOS)
+            ImmDisableIME((DWORD)(-1));
+#endif
+            SetIME();
         }
 	}
 	else {
@@ -419,7 +494,12 @@ void MSG_Init() {
         if (pathprop != NULL) {
             std::string path = pathprop->realpath;
             ResolvePath(path);
-            LoadMessageFile(path.c_str());
+            if (testLoadLangFile(path.c_str()))
+                LoadMessageFile(path.c_str());
+            else {
+                std::string lang = section->Get_string("language");
+                if (lang.size()) LoadMessageFile(lang.c_str());
+            }
         }
 	}
     std::string showdbcsstr = static_cast<Section_prop *>(control->GetSection("dosv"))->Get_string("showdbcsnodosv");

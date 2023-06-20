@@ -25,6 +25,10 @@
 #include "dos_inc.h"
 #include "control.h"
 #include "support.h"
+#include "cpu.h"
+
+#include <array>
+#include <cstring>
 #include <list>
 #include <SDL.h>
 
@@ -35,6 +39,10 @@ void DOS_HMA_CLAIMED(uint16_t bytes);
 bool ANSI_SYS_installed();
 #if defined(MACOSX)
 bool SetClipboard(std::string value);
+#endif
+#if (!defined(WIN32) && defined(C_SDL2)) || defined(MACOSX)
+typedef char host_cnv_char_t;
+host_cnv_char_t *CodePageGuestToHost(const char *s);
 #endif
 
 extern bool enable_share_exe, enable_network_redirector;
@@ -264,7 +272,7 @@ static bool DOS_MultiplexFunctions(void) {
     case 0x1600:    /* Windows enhanced mode installation check */
         // Leave AX as 0x1600, indicating that neither Windows 3.x enhanced mode, Windows/386 2.x
         // nor Windows 95 are running, nor is XMS version 1 driver installed
-		if (!control->SecureMode() && ((reg_sp == 0xFFF6 && mem_readw(SegPhys(ss)+reg_sp) == 0x142A) || !strcmp(RunningProgram, "DOSCLIP"))) // Hack for DOSCLIP
+		if (!control->SecureMode() && ((reg_sp == 0xFFF6 && mem_readw(SegPhys(ss)+reg_sp) == 0x142A) || (reg_sp == 0xFF88 && mem_readw(SegPhys(ss)+reg_sp) == 0xFF9D) || !strcmp(RunningProgram, "DOSCLIP") || !strcmp(RunningProgram, "TOCLIP"))) // Hack for DOSCLIP/TOCLIP
 			reg_ax = 0x301;
         return true;
 	case 0x1605:	/* Windows init broadcast */
@@ -351,7 +359,7 @@ static bool DOS_MultiplexFunctions(void) {
 					reg_bx = (reg_dx & 0x16);
 					reg_dx = 0xa2ab;
 					return true;
-				case 0x0003:		// get size of data struc
+				case 0x0003:		// get size of data struct
 					if (reg_dx==0x0001) {
 						// CDS size requested
 						reg_ax = 0xb97c;
@@ -389,20 +397,32 @@ static bool DOS_MultiplexFunctions(void) {
 		return false;
 	}
 	case 0x1680:	/*  RELEASE CURRENT VIRTUAL MACHINE TIME-SLICE */
-		//TODO Maybe do some idling but could screw up other systems :)
-		return true; //So no warning in the debugger anymore
+    {
+        static const bool idle_enabled = ((Section_prop*)control->GetSection("dos"))->Get_bool("dos idle api");
+        if (idle_enabled) {
+            CPU_STI();
+            CPU_HLT(reg_eip);
+            reg_al = 0;
+        }
+		return true;
+    }
 	case 0x1689:	/*  Kernel IDLE CALL */
 	case 0x168f:	/*  Close awareness crap */
 	   /* Removing warning */
 		return true;
 	case 0x1700:
 		if(control->SecureMode()||!clipboard_dosapi) return false;
-        {// Norton Utilities 8.0 installer checks this before continue
+        {
+			static constexpr std::array<const char*, 7> blacklisted {
+				"DEFRAG", "DISKEDIT", "NDD", "NDIAGS", "UNERASE", "UNFORMAT", "WINCHECK"
+			};
             char psp_name[9];
             DOS_MCB psp_mcb(dos.psp()-1);
             psp_mcb.GetFileName(psp_name);
-	    // NTS: DEFRAG.EXE for MS-DOS 6.22 assumes Windows is running if this call responds affirmatively, because it would mean WINOLDAP is resident.
-            if (((!strcmp(psp_name, "INSTALL") || !strcmp(psp_name, "INSTALLD")) && reg_sp >= 0xD000 && mem_readw(SegPhys(ss)+reg_sp)/0x100 == 0x1E) || !strcmp(psp_name, "DISKEDIT") || !strcmp(psp_name, "NDD") || !strcmp(psp_name, "NDIAGS") || !strcmp(psp_name, "UNERASE") || !strcmp(psp_name, "UNFORMAT") || !strcmp(psp_name,"DEFRAG")) return false;
+	    	// NTS: DEFRAG.EXE for MS-DOS 6.22 assumes Windows is running if this call responds affirmatively, because it would mean WINOLDAP is resident.
+            for (auto prog : blacklisted) if (!std::strcmp(psp_name, prog)) return false;
+            // Special case for INSTALL/INSTALLD
+            if (((!strcmp(psp_name, "INSTALL") || !strcmp(psp_name, "INSTALLD")) && reg_sp >= 0xD000 && mem_readw(SegPhys(ss)+reg_sp)/0x100 == 0x1E)) return false;
         }
 		reg_al = 1;
 		reg_ah = 1;
@@ -461,8 +481,7 @@ static bool DOS_MultiplexFunctions(void) {
             std::istringstream iss(text);
             std::string result="";
             for (std::string token; std::getline(iss, token); ) {
-                typedef char host_cnv_char_t;
-                host_cnv_char_t *CodePageGuestToHost(const char *s);
+                if (token.size() && token.back() == 13) token.pop_back();
                 char* uname = CodePageGuestToHost(token.c_str());
                 result+=(uname!=NULL?std::string(uname):token)+std::string(1, 10);
             }

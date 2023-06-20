@@ -37,6 +37,9 @@
 #include "sdlmain.h"
 #include "../ints/int10.h"
 
+#include <output/output_opengl.h>
+#include <output/output_ttf.h>
+
 #if DOSBOXMENU_TYPE == DOSBOXMENU_SDLDRAW
 unsigned int min_sdldraw_menu_width = 500;
 unsigned int min_sdldraw_menu_height = 300;
@@ -137,7 +140,12 @@ static const char *def_menu_main[] =
 {
     "mapper_gui",
     "mapper_mapper",
+#if !defined(HX_DOS)
+    "--",
+    "mapper_quickrun",
+    "loadlang",
     "mapper_loadmap",
+#endif
     "--",
     "MainSendKey",
     "MainHostKey",
@@ -147,11 +155,11 @@ static const char *def_menu_main[] =
     "auto_lock_mouse",
     "WheelToArrow",
     "--",
+    "alwaysontop",
 #if !defined(C_EMSCRIPTEN)//FIXME: Reset causes problems with Emscripten
     "mapper_pause",
     "mapper_pauseints",
 #endif
-    "showdetails",
 #if !defined(C_EMSCRIPTEN)//FIXME: Reset causes problems with Emscripten
     "--",
     "mapper_reset",
@@ -160,7 +168,6 @@ static const char *def_menu_main[] =
     "--",
     "restartinst",
     "restartconf",
-    "restartlang",
     "--",
     "mapper_shutdown",
 #endif
@@ -378,8 +385,14 @@ static const char *def_menu_video_output[] =
 #if defined(USE_TTF)
     "output_ttf",
 #endif
+#if C_GAMELINK
+    "output_gamelink",
+#endif
     "--",
     "doublescan",
+#if !defined(C_SDL2)
+    "doublebuf",
+#endif
     NULL
 };
 
@@ -447,14 +460,12 @@ static const char *def_menu_video_ttf[] =
 /* video vsync menu ("VideoVsyncMenu") */
 static const char *def_menu_video_vsync[] =
 {
-#if !defined(C_SDL2)
     "vsync_on",
     "vsync_force",
     "vsync_host",
     "vsync_off",
     "--",
     "vsync_set_syncrate",
-#endif
     NULL
 };
 
@@ -505,30 +516,24 @@ static const char *def_menu_video[] =
 #if !defined(C_SDL2) && defined(MACOSX)
     "highdpienable",
 #endif
-#if !defined(HX_DOS)
     "mapper_resetsize",
-#endif
     "--",
-#if !defined(HX_DOS) && (defined(LINUX) || !defined(C_SDL2))
-    "alwaysontop",
+#if !defined(HX_DOS)
+    "mapper_fullscr",
 #endif
 #ifndef MACOSX
     "mapper_togmenu",
 #endif
-#if !defined(HX_DOS)
-    "mapper_fullscr",
-#endif
-#if !defined(C_SDL2)
-    "doublebuf",
-#endif
+    "showdetails",
     "--",
+    "set_titletext",
+    "set_transparency",
     "refresh_rate",
+    "--",
     "mapper_fscaler",
     "VideoScalerMenu",
     "VideoOutputMenu",
-#if !defined(C_SDL2)
     "VideoVsyncMenu",
-#endif
     "--",
     "VideoOverscanMenu",
     "VideoFrameskipMenu",
@@ -556,17 +561,15 @@ static const char *def_menu_video[] =
 /* DOS menu ("DOSMenu") */
 static const char *def_menu_dos[] =
 {
-#if !defined(HX_DOS)
-    "mapper_quickrun",
-#endif
     "DOSVerMenu",
     "DOSLFNMenu",
-    "--",
-    "DOSMouseMenu",
-    "DOSEMSMenu",
 #if defined(WIN32) && !defined(HX_DOS) || defined(LINUX) || defined(MACOSX)
     "DOSWinMenu",
 #endif
+    "--",
+    "DOSMouseMenu",
+    "DOSEMSMenu",
+    "DOSDiskRateMenu",
     "--",
     "enable_a20gate",
     "quick_reboot",
@@ -632,6 +635,14 @@ static const char *def_menu_dos_ems[] =
     NULL
 };
 
+/* DOS disk rate menu ("DOSDiskRateMenu") */
+static const char *def_menu_dos_diskrate[] =
+{
+    "limit_hdd_rate",
+    "limit_floppy_rate",
+    NULL
+};
+
 #if defined(WIN32) && !defined(HX_DOS) || defined(LINUX) || defined(MACOSX)
 /* DOS WIN menu ("DOSWinMenu") */
 static const char *def_menu_dos_win[] =
@@ -667,6 +678,7 @@ static const char *def_menu_capture[] =
 {
 #if defined(C_SSHOT)
     "mapper_scrshot",
+    "mapper_rawscrshot",
     "--",
 #endif
 #if !defined(C_EMSCRIPTEN)
@@ -679,6 +691,7 @@ static const char *def_menu_capture[] =
     "mapper_recmtwave",
     "mapper_caprawopl",
     "mapper_caprawmidi",
+    "mapper_capnetrf",
     "--",
 #endif
     "saveoptionmenu",
@@ -807,8 +820,11 @@ static const char* def_menu_debug[] =
     "save_logas",
     "--",
     "show_console",
+    "clear_console",
     "disable_logging",
     "wait_on_error",
+    "--",
+    "video_debug_overlay",
     "--",
     "debug_logint21",
     "debug_logfileio",
@@ -819,6 +835,8 @@ static const char* def_menu_help_debug[] =
 {
     "show_console",
     "wait_on_error",
+    "--",
+    "video_debug_overlay",
     NULL
 };
 #endif
@@ -1268,6 +1286,7 @@ LPWSTR getWString(std::string str, wchar_t *def, wchar_t*& buffer) {
     uint16_t len=(uint16_t)str.size();
     if (cp>0) {
         if (cp==808) cp=866;
+        else if (cp==859) cp=858;
         else if (cp==872) cp=855;
         else if (cp==951) cp=950;
         reqsize = MultiByteToWideChar(cp, 0, str.c_str(), len+1, NULL, 0);
@@ -1320,6 +1339,7 @@ std::string DOSBoxMenu::item::winConstructMenuText(void) {
 
 void DOSBoxMenu::item::winAppendMenu(HMENU handle) {
     wchar_t* buffer = NULL;
+    wchar_t emptyStr[] = L"";
     if (type == separator_type_id) {
         AppendMenu(handle, MF_SEPARATOR, 0, NULL);
     }
@@ -1328,7 +1348,7 @@ void DOSBoxMenu::item::winAppendMenu(HMENU handle) {
     }
     else if (type == submenu_type_id) {
         if (winMenu != NULL) {
-            LPWSTR str = getWString(winConstructMenuText(), L"", buffer);
+            LPWSTR str = getWString(winConstructMenuText(), emptyStr, buffer);
             if (wcscmp(str, L""))
                 AppendMenuW(handle, MF_POPUP | MF_STRING, (uintptr_t)winMenu, str);
             else
@@ -1341,7 +1361,7 @@ void DOSBoxMenu::item::winAppendMenu(HMENU handle) {
         attr |= (status.checked) ? MF_CHECKED : MF_UNCHECKED;
         attr |= (status.enabled) ? MF_ENABLED : (MF_DISABLED | MF_GRAYED);
 
-        LPWSTR str = getWString(winConstructMenuText(), L"", buffer);
+        LPWSTR str = getWString(winConstructMenuText(), emptyStr, buffer);
         if (wcscmp(str, L""))
             AppendMenuW(handle, attr, (uintptr_t)(master_id + winMenuMinimumID), str);
         else
@@ -1453,7 +1473,8 @@ void DOSBoxMenu::item::refresh_item(DOSBoxMenu &menu) {
                 attr |= (status.enabled) ? MF_ENABLED : (MF_DISABLED | MF_GRAYED);
 
                 wchar_t* buffer = NULL;
-                LPWSTR str = getWString(winConstructMenuText(), L"", buffer);
+                wchar_t emptyStr[] = L"";
+                LPWSTR str = getWString(winConstructMenuText(), emptyStr, buffer);
                 if (wcscmp(str, L""))
                     ModifyMenuW(phandle, (uintptr_t)(master_id + winMenuMinimumID), attr | MF_BYCOMMAND, (uintptr_t)(master_id + winMenuMinimumID), str);
                 else
@@ -1506,7 +1527,7 @@ void ConstructSubMenu(DOSBoxMenu::item_handle_t item_id, const char * const * li
          *      This seemingly inefficient method of populating the display
          *      list is REQUIRED because DOSBoxMenu::item& is a reference
          *      to a std::vector, and the reference becomes invalid when
-         *      the vector reallocates to accomodate more entries.
+         *      the vector reallocates to accommodate more entries.
          *
          *      Holding onto one reference for the entire loop risks a
          *      segfault (use after free) bug if the vector should reallocate
@@ -1648,6 +1669,9 @@ void ConstructMenu(void) {
 
     /* DOS EMS menu */
     ConstructSubMenu(mainMenu.get_item("DOSEMSMenu").get_master_id(), def_menu_dos_ems);
+
+    /* DOS disk rate menu */
+    ConstructSubMenu(mainMenu.get_item("DOSDiskRateMenu").get_master_id(), def_menu_dos_diskrate);
 
 #if defined(WIN32) && !defined(HX_DOS) || defined(LINUX) || defined(MACOSX)
     /* DOS WIN menu */
@@ -1809,13 +1833,15 @@ void SDL1_hax_SetMenu(HMENU menu) {
         SetMenu(GetHWND(), NULL);
         return;
     }
-    bool res = SetMenu(GetHWND(), menu);
-    if (!res) {
-        mainMenu.unbuild();
-        mainMenu.rebuild();
-        res = SetMenu(GetHWND(), mainMenu.getWinMenu());
+    if(GetMenu(GetHWND()) != menu) {
+        bool res = SetMenu(GetHWND(), menu);
+        if(!res) {
+            mainMenu.unbuild();
+            mainMenu.rebuild();
+            res = SetMenu(GetHWND(), mainMenu.getWinMenu());
+        }
+        DrawMenuBar(GetHWND());
     }
-    DrawMenuBar(GetHWND());
 #endif
 }
 #elif DOSBOXMENU_TYPE == DOSBOXMENU_HMENU
@@ -1839,8 +1865,12 @@ void DOSBox_SetMenu(DOSBoxMenu &altMenu) {
 
     LOG(LOG_MISC,LOG_DEBUG)("Win32: loading and attaching custom menu resource to DOSBox-X's window");
 
-    NonUserResizeCounter=1;
+    HMENU pMenu = GetMenu(GetHWND());
+
     SDL1_hax_SetMenu(altMenu.getWinMenu());
+
+    if((GetMenu(GetHWND()) != NULL) != (pMenu != NULL))
+        NonUserResizeCounter = 1;
 #endif
 }
 
@@ -1854,6 +1884,8 @@ void DOSBox_SetMenu(void) {
     }
 #endif
 #if DOSBOXMENU_TYPE == DOSBOXMENU_NSMENU /* TODO: Move to menu.cpp DOSBox_SetMenu() and add setmenu(NULL) to DOSBox_NoMenu() @emendelson request showmenu=false */
+    if(!menu.gui) return;
+    menu.toggle=true;
     void sdl_hax_macosx_setmenu(void *nsMenu);
     sdl_hax_macosx_setmenu(mainMenu.getNsMenu());
 #endif
@@ -1862,8 +1894,9 @@ void DOSBox_SetMenu(void) {
 
     LOG(LOG_MISC,LOG_DEBUG)("Win32: loading and attaching menu resource to DOSBox-X's window");
 
+    HMENU pMenu = GetMenu(GetHWND());
+
     menu.toggle=true;
-    NonUserResizeCounter=1;
     SDL1_hax_SetMenu(mainMenu.getWinMenu());
     mainMenu.get_item("mapper_togmenu").check(!menu.toggle).refresh_item(mainMenu);
 
@@ -1872,6 +1905,9 @@ void DOSBox_SetMenu(void) {
     if(menu.startup) {
         RENDER_CallBack( GFX_CallBackReset );
     }
+
+    if((GetMenu(GetHWND()) != NULL) != (pMenu != NULL))
+        NonUserResizeCounter = 1;
 #endif
 #if defined(USE_TTF)
     if (ttf.inUse) resetFontSize();
@@ -1889,6 +1925,8 @@ void DOSBox_NoMenu(void) {
     }
 #endif
 #if DOSBOXMENU_TYPE == DOSBOXMENU_NSMENU
+    if(!menu.gui) return;
+    menu.toggle=false;
     void sdl_hax_macosx_setmenu(void *nsMenu);
     sdl_hax_macosx_setmenu(NULL);
 #endif
@@ -2017,7 +2055,8 @@ void DOSBox_SetSysMenu(void) {
         mii.fMask = MIIM_ID | MIIM_STRING | MIIM_STATE;
         mii.fState = (menu.toggle ? MFS_CHECKED : 0) | (GFX_GetPreventFullscreen() ? MFS_DISABLED : MFS_ENABLED);
         mii.wID = ID_WIN_SYSMENU_TOGGLEMENU;
-        mii.dwTypeData = getWString(msg, L"Show menu bar", buffer);
+        wchar_t showMenuBarStr[] = L"Show menu bar";
+        mii.dwTypeData = getWString(msg, showMenuBarStr, buffer);
         mii.cch = (UINT)(wcslen(mii.dwTypeData)+1);
 
         InsertMenuItemW(sysmenu, GetMenuItemCount(sysmenu), TRUE, &mii);
@@ -2032,7 +2071,8 @@ void DOSBox_SetSysMenu(void) {
         mii.fMask = MIIM_ID | MIIM_STRING | MIIM_STATE;
         mii.fState = (is_paused ? MFS_CHECKED : 0) | MFS_ENABLED;
         mii.wID = ID_WIN_SYSMENU_PAUSE;
-        mii.dwTypeData = getWString(msg, L"Pause emulation", buffer);
+        wchar_t pauseEmulationStr[] = L"Pause emulation";
+        mii.dwTypeData = getWString(msg, pauseEmulationStr, buffer);
         mii.cch = (UINT)(wcslen(mii.dwTypeData)+1);
 
         InsertMenuItemW(sysmenu, GetMenuItemCount(sysmenu), TRUE, &mii);
@@ -2049,7 +2089,8 @@ void DOSBox_SetSysMenu(void) {
         mii.fMask = MIIM_ID | MIIM_STRING | MIIM_STATE;
         mii.fState = MFS_ENABLED;
         mii.wID = ID_WIN_SYSMENU_RESETSIZE;
-        mii.dwTypeData = getWString(msg, L"Reset window size", buffer);
+        wchar_t resetWindowSizeStr[] = L"Reset window size";
+        mii.dwTypeData = getWString(msg, resetWindowSizeStr, buffer);
         mii.cch = (UINT)(wcslen(mii.dwTypeData)+1);
 
         InsertMenuItemW(sysmenu, GetMenuItemCount(sysmenu), TRUE, &mii);
@@ -2065,7 +2106,8 @@ void DOSBox_SetSysMenu(void) {
         mii.fMask = MIIM_ID | MIIM_STRING | MIIM_STATE;
         mii.fState = TTF_using() ? MFS_ENABLED : MFS_DISABLED;
         mii.wID = ID_WIN_SYSMENU_TTFINCSIZE;
-        mii.dwTypeData = getWString(msg, L"Increase TTF font size", buffer);
+        wchar_t increaseTTFFontSizeStr[] = L"Increase TTF font size";
+        mii.dwTypeData = getWString(msg, increaseTTFFontSizeStr, buffer);
         mii.cch = (UINT)(wcslen(mii.dwTypeData)+1);
 
         InsertMenuItemW(sysmenu, GetMenuItemCount(sysmenu), TRUE, &mii);
@@ -2080,7 +2122,8 @@ void DOSBox_SetSysMenu(void) {
         mii.fMask = MIIM_ID | MIIM_STRING | MIIM_STATE;
         mii.fState = TTF_using() ? MFS_ENABLED : MFS_DISABLED;
         mii.wID = ID_WIN_SYSMENU_TTFDECSIZE;
-        mii.dwTypeData = getWString(msg, L"Decrease TTF font size", buffer);
+        wchar_t decreaseTTFFontSizeStr[] = L"Decrease TTF font size";
+        mii.dwTypeData = getWString(msg, decreaseTTFFontSizeStr, buffer);
         mii.cch = (UINT)(wcslen(mii.dwTypeData)+1);
 
         InsertMenuItemW(sysmenu, GetMenuItemCount(sysmenu), TRUE, &mii);
@@ -2098,7 +2141,8 @@ void DOSBox_SetSysMenu(void) {
         mii.fMask = MIIM_ID | MIIM_STRING | MIIM_STATE;
         mii.fState = MFS_ENABLED;
         mii.wID = ID_WIN_SYSMENU_CFG_GUI;
-        mii.dwTypeData = getWString(msg, L"Configuration tool", buffer);
+        wchar_t configurationToolStr[] = L"Configuration tool";
+        mii.dwTypeData = getWString(msg, configurationToolStr, buffer);
         mii.cch = (UINT)(wcslen(mii.dwTypeData)+1);
 
         InsertMenuItemW(sysmenu, GetMenuItemCount(sysmenu), TRUE, &mii);
@@ -2113,7 +2157,8 @@ void DOSBox_SetSysMenu(void) {
         mii.fMask = MIIM_ID | MIIM_STRING | MIIM_STATE;
         mii.fState = MFS_ENABLED;
         mii.wID = ID_WIN_SYSMENU_MAPPER;
-        mii.dwTypeData = getWString(msg, L"Mapper editor", buffer);
+        wchar_t mapperEditorStr[] = L"Mapper editor";
+        mii.dwTypeData = getWString(msg, mapperEditorStr, buffer);
         mii.cch = (UINT)(wcslen(mii.dwTypeData)+1);
 
         InsertMenuItemW(sysmenu, GetMenuItemCount(sysmenu), TRUE, &mii);
@@ -2215,7 +2260,7 @@ umount:
             Drives[i_drive-'A'] = 0;
             if(i_drive-'A' == DOS_GetDefaultDrive()) 
                 DOS_SetDrive(toupper('Z') - 'A');
-            LOG_MSG("GUI:Drive %c has succesfully been removed.",i_drive); break;
+            LOG_MSG("GUI:Drive %c has successfully been removed.",i_drive); break;
         case 1:
             LOG_MSG("GUI:Virtual Drives can not be unMOUNTed."); break;
         case 2:
@@ -2804,7 +2849,9 @@ void MenuDrawRect(int x,int y,int w,int h,Bitu color) {
         glDisable(GL_SCISSOR_TEST);
         glDisable(GL_STENCIL_TEST);
         glDisable(GL_TEXTURE_2D);
-
+#if SDL_BYTEORDER == SDL_LIL_ENDIAN && defined(MACOSX)
+        if (color >= 0x1000000) color = ((color / 0x1000000) % 0x100) + ((color / 0x10000) % 0x100) * 0x100 + ((color / 0x100) % 0x100) * 0x10000;
+#endif
         glColor3ub((color >> 16UL) & 0xFF,(color >> 8UL) & 0xFF,(color >> 0UL) & 0xFF);
         glBegin(GL_QUADS);
         glVertex2i(x  ,y  );
@@ -3128,7 +3175,9 @@ void MenuDrawText(int x,int y,const char *text,Bitu color,bool check=false) {
         glMatrixMode (GL_TEXTURE);
         glLoadIdentity ();
         glScaled(1.0 / SDLDrawGenFontTextureWidth, 1.0 / SDLDrawGenFontTextureHeight, 1.0);
-
+#if SDL_BYTEORDER == SDL_LIL_ENDIAN && defined(MACOSX)
+        if (color >= 0x1000000) color = ((color / 0x1000000) % 0x100) + ((color / 0x10000) % 0x100) * 0x100 + ((color / 0x100) % 0x100) * 0x10000;
+#endif
         glColor4ub((color >> 16UL) & 0xFF,(color >> 8UL) & 0xFF,(color >> 0UL) & 0xFF,0xFF);
         glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE);
 

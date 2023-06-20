@@ -51,13 +51,16 @@ RECT monrect;
 int curscreen;
 #endif
 
+#include <output/output_tools.h>
+#include <output/output_ttf.h>
+
 Bitu call_program;
 extern char lastmount;
 extern const char *modifier;
 extern unsigned int sendkeymap;
 extern std::string langname, configfile, dosbox_title;
-extern int autofixwarn, enablelfn, fat32setver, paste_speed, wheel_key, freesizecap, wpType, wpVersion, wpBG, wpFG, lastset, blinkCursor;
-extern bool dos_kernel_disabled, force_nocachedir, wpcolon, lockmount, enable_config_as_shell_commands, lesssize, load, winrun, winautorun, startcmd, startwait, startquiet, starttranspath, mountwarning, wheel_guest, clipboard_dosapi, noremark_save_state, force_load_state, sync_time, manualtime, ttfswitch, loadlang, showbold, showital, showline, showsout, char512, printfont, rtl, gbk, chinasea, uao, showdbcs, dbcs_sbcs, autoboxdraw, halfwidthkana, ticksLocked, outcon, enable_dbcs_tables, show_recorded_filename;
+extern int autofixwarn, enablelfn, fat32setver, paste_speed, wheel_key, freesizecap, wpType, wpVersion, wpBG, wpFG, lastset, blinkCursor, msgcodepage;
+extern bool dos_kernel_disabled, force_nocachedir, wpcolon, convertimg, lockmount, enable_config_as_shell_commands, lesssize, load, winrun, winautorun, startcmd, startwait, startquiet, starttranspath, mountwarning, wheel_guest, clipboard_dosapi, noremark_save_state, force_load_state, sync_time, manualtime, ttfswitch, loadlang, showbold, showital, showline, showsout, char512, printfont, rtl, gbk, chinasea, uao, showdbcs, dbcs_sbcs, autoboxdraw, halfwidthkana, ticksLocked, outcon, enable_dbcs_tables, show_recorded_filename, internal_program, pipetmpdev, notrysgf, uselangcp, incall;
 
 /* This registers a file on the virtual drive and creates the correct structure for it*/
 
@@ -97,9 +100,10 @@ public:
 
 static std::vector<InternalProgramEntry*> internal_progs;
 uint8_t DOS_GetAnsiAttr(void);
+int setTTFMap(bool changecp);
 char *FormatDate(uint16_t year, uint8_t month, uint8_t day);
 bool isDBCSCP(void), CheckBoxDrawing(uint8_t c1, uint8_t c2, uint8_t c3, uint8_t c4), DOS_SetAnsiAttr(uint8_t attr), GFX_GetPreventFullscreen(void), toOutput(const char *what);
-void EMS_DoShutDown(void), UpdateDefaultPrinterFont(void), GFX_ForceRedrawScreen(void), resetFontSize(void), ttf_reset_colors(void), makestdcp950table(void), makeseacp951table(void), clearFontCache(void), DOSBox_SetSysMenu(void), MSG_Init(void), initRand(void), PRINTER_Init(void);
+void EMS_DoShutDown(void), UpdateDefaultPrinterFont(void), GFX_ForceRedrawScreen(void), resetFontSize(void), ttf_reset_colors(void), makestdcp950table(void), makeseacp951table(void), clearFontCache(void), DOSBox_SetSysMenu(void), MSG_Init(void), initRand(void), PRINTER_Init(void), SetKEYBCP(void);
 void EMS_Startup(Section* sec), DOSV_SetConfig(Section_prop *section), DOSBOX_UnlockSpeed2(bool pressed), RebootLanguage(std::string filename, bool confirm=false), SetWindowTransparency(int trans), SetOutputSwitch(const char *outputstr), runRescan(const char *str), runSerial(const char *str), runParallel(const char *str), DOS_AddDays(uint8_t days), PRINTER_Shutdown(Section* sec), setAspectRatio(Section_prop * section);
 
 void PROGRAMS_Shutdown(void) {
@@ -136,7 +140,9 @@ void PROGRAMS_MakeFile(char const * const name,PROGRAMS_Main * main,const char *
 	ipe->comsize = size;
 	ipe->comdata = comdata;
 	internal_progs.push_back(ipe);
+	internal_program = true;
 	VFILE_Register(name,ipe->comdata,ipe->comsize,dir);
+	internal_program = false;
 }
 
 static Bitu PROGRAMS_Handler(void) {
@@ -243,7 +249,7 @@ void Program::WriteOut(const char * format,...) {
 }
 
 void Program::WriteOut(const char *format, const char *arguments) {
-	char buf[2048];
+	char buf[2048 + CMD_MAXLINE];
 	sprintf(buf,format,arguments);
 
 	uint16_t size = (uint16_t)strlen(buf);
@@ -626,6 +632,27 @@ private:
 void dos_ver_menu(bool start), ReloadMapper(Section_prop *sec, bool init), SetGameState_Run(int value), update_dos_ems_menu(void), MountAllDrives(bool quiet), GFX_SwitchFullScreen(void), RebootConfig(std::string filename, bool confirm=false);
 bool set_ver(char *s), GFX_IsFullscreen(void);
 
+void Load_Language(std::string name) {
+    if (control->opt_lang != "") control->opt_lang = name;
+    MSG_Init();
+#if DOSBOXMENU_TYPE == DOSBOXMENU_HMENU || DOSBOXMENU_TYPE == DOSBOXMENU_NSMENU
+    mainMenu.unbuild();
+    mainMenu.rebuild();
+#endif
+    if (!GFX_GetPreventFullscreen()) {
+        if (menu.toggle) DOSBox_SetMenu(); else DOSBox_NoMenu();
+    }
+#if defined(USE_TTF)
+    if (TTF_using()) resetFontSize();
+#endif
+    if (!uselangcp && !incall) {
+        int oldmsgcp = msgcodepage;
+        msgcodepage = dos.loaded_codepage;
+        SetKEYBCP();
+        msgcodepage = oldmsgcp;
+    }
+}
+
 void ApplySetting(std::string pvar, std::string inputline, bool quiet) {
     if (!strcasecmp(pvar.c_str(), "dosbox")||!strcasecmp(pvar.c_str(), "dos")||!strcasecmp(pvar.c_str(), "dosv")||!strcasecmp(pvar.c_str(), "cpu")||!strcasecmp(pvar.c_str(), "sdl")||!strcasecmp(pvar.c_str(), "ttf")||!strcasecmp(pvar.c_str(), "render")||!strcasecmp(pvar.c_str(), "serial")||!strcasecmp(pvar.c_str(), "parallel")||!strcasecmp(pvar.c_str(), "printer")) {
         Section_prop *section = static_cast<Section_prop *>(control->GetSection(pvar.c_str()));
@@ -641,6 +668,7 @@ void ApplySetting(std::string pvar, std::string inputline, bool quiet) {
                 if (freesizestr == "fixed" || freesizestr == "false" || freesizestr == "0") freesizecap = 0;
                 else if (freesizestr == "relative" || freesizestr == "2") freesizecap = 2;
                 else freesizecap = 1;
+                convertimg = section->Get_bool("convertdrivefat");
                 wpcolon = section->Get_bool("leading colon write protect image");
                 lockmount = section->Get_bool("locking disk image mount");
                 if (!strcasecmp(inputline.substr(0, 9).c_str(), "saveslot=")) SetGameState_Run(section->Get_int("saveslot")-1);
@@ -658,20 +686,8 @@ void ApplySetting(std::string pvar, std::string inputline, bool quiet) {
                     dosbox_title=section->Get_string("title");
                     trim(dosbox_title);
                 }
-                if (!strcasecmp(inputline.substr(0, 9).c_str(), "language=")) {
-                    if (control->opt_lang != "") control->opt_lang = section->Get_string("language");
-                    MSG_Init();
-#if DOSBOXMENU_TYPE == DOSBOXMENU_HMENU
-                    mainMenu.unbuild();
-                    mainMenu.rebuild();
-                    if (!GFX_GetPreventFullscreen()) {
-                        if (menu.toggle) DOSBox_SetMenu(); else DOSBox_NoMenu();
-                    }
-#endif
-#if defined(USE_TTF)
-                    if (TTF_using()) resetFontSize();
-#endif
-                }
+                if (!strcasecmp(inputline.substr(0, 9).c_str(), "language="))
+                    Load_Language(section->Get_string("language"));
                 if (!strcasecmp(inputline.substr(0, 16).c_str(), "mapper send key=")) {
                     std::string mapsendkey = section->Get_string("mapper send key");
                     if (mapsendkey=="winlogo") sendkeymap=1;
@@ -709,13 +725,17 @@ void ApplySetting(std::string pvar, std::string inputline, bool quiet) {
                     sdl.mouse.xsensitivity = p3->GetSection()->Get_int("xsens");
                     sdl.mouse.ysensitivity = p3->GetSection()->Get_int("ysens");
                 }
+#if C_GAMELINK
+                if (!strcasecmp(inputline.substr(0, 22).c_str(), "gamelink load address=")) {
+                    sdl.gamelink.loadaddr = section->Get_int("gamelink load address");
+                }
+#endif
                 if (!strcasecmp(inputline.substr(0, 11).c_str(), "fullscreen=")) {
                     if (section->Get_bool("fullscreen")) {
                         if (!GFX_IsFullscreen()) {GFX_LosingFocus();GFX_SwitchFullScreen();}
                     } else if (GFX_IsFullscreen()) {GFX_LosingFocus();GFX_SwitchFullScreen();}
                 }
                 if (!strcasecmp(inputline.substr(0, 7).c_str(), "output=")) {
-                    std::string GetDefaultOutput();
                     std::string output=section->Get_string("output");
                     if (output == "default") output=GetDefaultOutput();
                     GFX_LosingFocus();
@@ -757,7 +777,6 @@ void ApplySetting(std::string pvar, std::string inputline, bool quiet) {
 #endif
                 if (!strcasecmp(inputline.substr(0, 8).c_str(), "display=")) {
                     void SetDisplayNumber(int display);
-                    int GetNumScreen();
                     int numscreen = GetNumScreen();
                     const int display = section->Get_int("display");
                     if (display >= 0 && display <= numscreen)
@@ -883,6 +902,8 @@ void ApplySetting(std::string pvar, std::string inputline, bool quiet) {
                 } else if (!strcasecmp(inputline.substr(0, 18).c_str(), "dos clipboard api=")) {
                     clipboard_dosapi = section->Get_bool("dos clipboard api");
                     mainMenu.get_item("clipboard_dosapi").check(clipboard_dosapi).refresh_item(mainMenu);
+                } else if (!strcasecmp(inputline.substr(0, 22).c_str(), "pipe temporary device=")) {
+                    pipetmpdev = section->Get_bool("pipe temporary device");
 #if defined(WIN32) && !defined(HX_DOS)
                 } else if (!strcasecmp(inputline.substr(0, 13).c_str(), "automountall=")) {
                     const char *automountstr = section->Get_string("automountall");
@@ -926,7 +947,13 @@ void ApplySetting(std::string pvar, std::string inputline, bool quiet) {
                 if (!strcasecmp(inputline.substr(0, 5).c_str(), "font=")) {
 #if defined(USE_TTF)
                     if (TTF_using()) {
+                        std::string font = section->Get_string("font");
+                        if (font.empty() && !IS_PC98_ARCH && !isDBCSCP()) notrysgf = true;
                         ttf_reset();
+                        notrysgf = false;
+                        int missing = IS_PC98_ARCH ? 0 : setTTFMap(false);
+                        if (missing > 0 && first_shell) first_shell->WriteOut(MSG_Get("SHELL_CMD_CHCP_MISSING"), missing);
+
 #if C_PRINTER
                         if (printfont) UpdateDefaultPrinterFont();
 #endif
@@ -1483,9 +1510,10 @@ void CONFIG::Run(void) {
 				WriteOut(MSG_Get("PROGRAM_CONFIG_GET_SYNTAX"));
 				return;
 			}
+			Section* sec = control->GetSectionFromProperty(pvars[0].c_str());
 			std::string::size_type spcpos = pvars[0].find_first_of(' ');
 			// split on the ' '
-			if (spcpos != std::string::npos) {
+			if (!sec && spcpos != std::string::npos) {
 				if (spcpos>1&&pvars[0].c_str()[spcpos-1]==',')
 					spcpos=pvars[0].find_first_of(' ', spcpos+1);
 				if (spcpos != std::string::npos) {
@@ -1497,7 +1525,7 @@ void CONFIG::Run(void) {
 			case 1: {
 				// property/section only
 				// is it a section?
-				Section* sec = control->GetSection(pvars[0].c_str());
+				sec = control->GetSection(pvars[0].c_str());
 				if (sec) {
 					// list properties in section
 					int i = 0;
@@ -1550,6 +1578,9 @@ void CONFIG::Run(void) {
 					sec = control->GetSectionFromProperty(pvars[0].c_str());
 					if (!sec&&pvars[0].size()>4&&!strcasecmp(pvars[0].substr(0, 4).c_str(), "ttf.")) {
 						pvars[0].erase(0,4);
+						sec = control->GetSectionFromProperty(pvars[0].c_str());
+					} else if (!sec && pvars[0].size() && !strcasecmp(pvars[0].c_str(), "langcp")) {
+						pvars[0] = "language";
 						sec = control->GetSectionFromProperty(pvars[0].c_str());
 					}
 					if (!sec) {
@@ -1608,7 +1639,14 @@ void CONFIG::Run(void) {
                             WriteOut("%d\n",rect.bottom-rect.top);
                             first_shell->SetEnv("CONFIG",std::to_string(rect.bottom-rect.top).c_str());
 #endif
+                        } else if (!strcasecmp(pvars[0].c_str(), "system")) {
+                            WriteOut("%s\n",PACKAGE);
+                            first_shell->SetEnv("CONFIG",PACKAGE);
+                        } else if (!strcasecmp(pvars[0].c_str(), "version")) {
+                            WriteOut("%s\n",VERSION);
+                            first_shell->SetEnv("CONFIG",VERSION);
                         } else if (!strcasecmp(pvars[0].c_str(), "hostos")) {
+                            if (securemode_check()) return;
                             const char *hostos =
 #if defined(HX_DOS)
                             "DOS"
@@ -1713,7 +1751,7 @@ void CONFIG::Run(void) {
 			}
 			case 2: {
 				// section + property
-				Section* sec = control->GetSection(pvars[0].c_str());
+				sec = control->GetSection(pvars[0].c_str());
 				if (!sec) {
 					WriteOut(MSG_Get("PROGRAM_CONFIG_SECTION_ERROR"), pvars[0].c_str());
 					return;
@@ -1785,27 +1823,39 @@ void CONFIG::Run(void) {
 			std::string rest;
 			if (cmd->GetStringRemain(rest)) pvars.push_back(rest);
 
+			Section* sec = control->GetSectionFromProperty(pvars[0].c_str());
 			// attempt to split off the first word
 			std::string::size_type spcpos = pvars[0].find_first_of(' ');
 			if (spcpos>1&&pvars[0].c_str()[spcpos-1]==',')
 				spcpos=pvars[0].find_first_of(' ', spcpos+1);
 
 			std::string::size_type equpos = pvars[0].find_first_of('=');
+            if (equpos != std::string::npos) {
+                std::string p = pvars[0];
+                p.erase(equpos);
+                sec = control->GetSectionFromProperty(p.c_str());
+            }
 
+            uselangcp = false;
 			if ((equpos != std::string::npos) && 
-				((spcpos == std::string::npos) || (equpos < spcpos))) {
+				((spcpos == std::string::npos) || (equpos < spcpos) || sec)) {
 				// If we have a '=' possibly before a ' ' split on the =
 				pvars.insert(pvars.begin()+1,pvars[0].substr(equpos+1));
 				pvars[0].erase(equpos);
 				// As we had a = the first thing must be a property now
-				Section* sec=control->GetSectionFromProperty(pvars[0].c_str());
+				sec=control->GetSectionFromProperty(pvars[0].c_str());
 				if (!sec&&pvars[0].size()>4&&!strcasecmp(pvars[0].substr(0, 4).c_str(), "ttf.")) {
 					pvars[0].erase(0,4);
 					sec = control->GetSectionFromProperty(pvars[0].c_str());
+				} else if (!sec && pvars[0].size() && !strcasecmp(pvars[0].c_str(), "langcp")) {
+					pvars[0] = "language";
+					sec = control->GetSectionFromProperty(pvars[0].c_str());
+					if (sec) uselangcp = true;
 				}
 				if (sec) pvars.insert(pvars.begin(),std::string(sec->GetName()));
 				else {
 					WriteOut(MSG_Get("PROGRAM_CONFIG_PROPERTY_ERROR"));
+					uselangcp = false;
 					return;
 				}
 				// order in the vector should be ok now
@@ -1816,7 +1866,7 @@ void CONFIG::Run(void) {
 					pvars[0].erase(spcpos);
 				}
 				// check if the first parameter is a section or property
-				Section* sec = control->GetSection(pvars[0].c_str());
+				sec = control->GetSection(pvars[0].c_str());
 				if (!sec) {
 					// not a section: little duplicate from above
 					sec=control->GetSectionFromProperty(pvars[0].c_str());
@@ -1843,7 +1893,7 @@ void CONFIG::Run(void) {
 					if (!sec2) {
 						// not a property, 
 						Section* sec3 = control->GetSectionFromProperty(pvars[0].c_str());
-						if (sec3) {
+						if (sec3 && !(equpos != std::string::npos && spcpos != std::string::npos && equpos > spcpos)) {
 							// section and property name are identical
 							pvars.insert(pvars.begin(),pvars[0]);
 						} // else has been checked above already
@@ -1852,6 +1902,7 @@ void CONFIG::Run(void) {
 			}
 			if(pvars.size() < 3) {
 				WriteOut(MSG_Get("PROGRAM_CONFIG_SET_SYNTAX"));
+				uselangcp = false;
 				return;
 			}
 			// check if the property actually exists in the section
@@ -1861,6 +1912,7 @@ void CONFIG::Run(void) {
 					WriteOut("Cannot set property %s in section %s.\n", pvars[1].c_str(),pvars[0].c_str());
 				else
 					WriteOut(MSG_Get("PROGRAM_CONFIG_NO_PROPERTY"), pvars[1].c_str(),pvars[0].c_str());
+				uselangcp = false;
 				return;
 			}
             bool applynew=false;
@@ -1926,6 +1978,7 @@ next:
 				else ApplySetting(pvars[0], inputline, false);
 			} else WriteOut(MSG_Get("PROGRAM_CONFIG_VALUE_ERROR"),
 				value.c_str(),pvars[1].c_str());
+			uselangcp = false;
 			return;
 		}
 		case P_WRITELANG: case P_WRITELANG2:

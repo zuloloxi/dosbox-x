@@ -29,6 +29,8 @@
 #include <malloc.h>
 #endif
 
+#include <output/output_ttf.h>
+
 uint8_t *clipAscii = NULL;
 uint32_t clipSize = 0;
 bool direct_mouse_clipboard = false;
@@ -57,13 +59,13 @@ bool Unicode2Ascii(const uint16_t* unicode) {
         memNeeded = strlen(temp);
     } else {
         morelen=false;
-        int memNeeded = WideCharToMultiByte(dos.loaded_codepage==808?866:(dos.loaded_codepage==872?855:(dos.loaded_codepage==951?950:dos.loaded_codepage)), WC_NO_BEST_FIT_CHARS, (LPCWSTR)unicode, -1, NULL, 0, "\x07", NULL);
+        int memNeeded = WideCharToMultiByte(dos.loaded_codepage==808?866:(dos.loaded_codepage==859?858:(dos.loaded_codepage==872?855:(dos.loaded_codepage==951?950:dos.loaded_codepage))), WC_NO_BEST_FIT_CHARS, (LPCWSTR)unicode, -1, NULL, 0, "\x07", NULL);
         if (memNeeded <= 1)																// Includes trailing null
             return false;
         if (!(clipAscii = (uint8_t *)malloc(memNeeded)))
             return false;
         // Untranslated characters will be set to 0x07 (BEL), and later stripped
-        if (WideCharToMultiByte(dos.loaded_codepage==808?866:(dos.loaded_codepage==872?855:(dos.loaded_codepage==951?950:dos.loaded_codepage)), WC_NO_BEST_FIT_CHARS, (LPCWSTR)unicode, -1, (LPSTR)clipAscii, memNeeded, "\x07", NULL) != memNeeded) {																			// Can't actually happen of course
+        if (WideCharToMultiByte(dos.loaded_codepage==808?866:(dos.loaded_codepage==859?858:(dos.loaded_codepage==872?855:(dos.loaded_codepage==951?950:dos.loaded_codepage))), WC_NO_BEST_FIT_CHARS, (LPCWSTR)unicode, -1, (LPSTR)clipAscii, memNeeded, "\x07", NULL) != memNeeded) {																			// Can't actually happen of course
             free(clipAscii);
             clipAscii = NULL;
             return false;
@@ -321,7 +323,7 @@ static void PasteInitMapSCToSDLKey()
 
 // Just in case, to keep us from entering an unexpected KB state
 const  size_t      kPasteMinBufExtra = 4;
-/// Sightly inefficient, but who cares
+/// Slightly inefficient, but who cares
 static void GenKBStroke(const UINT uiScanCode, const bool bDepressed, const SDLMod keymods)
 {
     const SDLKey sdlkey = aryScanCodeToSDLKey[uiScanCode & 0xFF];
@@ -383,7 +385,7 @@ bool PasteClipboardNext() {
             (bModCntrlOn ? KMOD_LCTRL : 0) |
             (bModAltOn ? KMOD_LALT : 0));
 
-        /// \note Currently pasteing a character is a two step affair, because if
+        /// \note Currently pasting a character is a two step affair, because if
         ///       you do it too quickly DI can miss a key press/release.
         // Could be made more efficient, but would require tracking of more state,
         // so let's forgot that for now...
@@ -724,10 +726,10 @@ void CopyClipboard(int all) {
             if (CodePageGuestToHostUTF16(temp,token.c_str())) {
                 result+=(wchar_t *)temp;
             } else {
-                int reqsize = MultiByteToWideChar(dos.loaded_codepage==808?866:(dos.loaded_codepage==872?855:(dos.loaded_codepage==951?950:dos.loaded_codepage)), 0, token.c_str(), token.size()+1, NULL, 0);
+                int reqsize = MultiByteToWideChar(dos.loaded_codepage==808?866:(dos.loaded_codepage==859?858:(dos.loaded_codepage==872?855:(dos.loaded_codepage==951?950:dos.loaded_codepage))), 0, token.c_str(), token.size()+1, NULL, 0);
                 if (reqsize>0) {
                     wch = new uint16_t[reqsize+1];
-                    if (MultiByteToWideChar(dos.loaded_codepage==808?866:(dos.loaded_codepage==872?855:(dos.loaded_codepage==951?950:dos.loaded_codepage)), 0, token.c_str(), token.size()+1, (LPWSTR)wch, reqsize)==reqsize) {
+                    if (MultiByteToWideChar(dos.loaded_codepage==808?866:(dos.loaded_codepage==859?858:(dos.loaded_codepage==872?855:(dos.loaded_codepage==951?950:dos.loaded_codepage))), 0, token.c_str(), token.size()+1, (LPWSTR)wch, reqsize)==reqsize) {
                         result+=(wchar_t *)wch;
                         delete[] wch;
                         continue;
@@ -740,12 +742,12 @@ void CopyClipboard(int all) {
                 delete[] wch;
             }
             result+=std::wstring(1, '\r')+std::wstring(1, '\n');
-            baselen+=token.size()+2;
+            baselen+=token.size()+1;
         }
-        if (baselen>1) {
+        if (baselen>0) {
             result.pop_back();
             result.pop_back();
-            baselen-=2;
+            baselen--;
         }
         morelen=false;
         baselen=0;
@@ -771,6 +773,7 @@ void CopyClipboard(int all) {
     morelen=true;
     baselen=0;
     for (std::string token; std::getline(iss, token); ) {
+        if (token.size() && token.back() == 13) token.pop_back();
         if (CodePageGuestToHostUTF8(temp,token.c_str()))
             result+=temp;
         else

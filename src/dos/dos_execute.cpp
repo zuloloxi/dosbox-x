@@ -29,6 +29,10 @@
 #include "debug.h"
 #include "cpu.h"
 #include "menu.h"
+#include "crc32.h"
+
+uint32_t RunningProgramHash[4] = {0,0,0,0};
+uint32_t RunningProgramLoadAddress = 0;
 
 const char * RunningProgram="DOSBOX-X";
 
@@ -68,33 +72,7 @@ unsigned int ENV_KEEPFREE = 83;
 #define LOAD    1
 #define OVERLAY 3
 
-
-
-static void SaveRegisters(void) {
-	reg_sp-=18;
-	mem_writew(SegPhys(ss)+reg_sp+ 0,reg_ax);
-	mem_writew(SegPhys(ss)+reg_sp+ 2,reg_cx);
-	mem_writew(SegPhys(ss)+reg_sp+ 4,reg_dx);
-	mem_writew(SegPhys(ss)+reg_sp+ 6,reg_bx);
-	mem_writew(SegPhys(ss)+reg_sp+ 8,reg_si);
-	mem_writew(SegPhys(ss)+reg_sp+10,reg_di);
-	mem_writew(SegPhys(ss)+reg_sp+12,reg_bp);
-	mem_writew(SegPhys(ss)+reg_sp+14,SegValue(ds));
-	mem_writew(SegPhys(ss)+reg_sp+16,SegValue(es));
-}
-
-static void RestoreRegisters(void) {
-	reg_ax=mem_readw(SegPhys(ss)+reg_sp+ 0);
-	reg_cx=mem_readw(SegPhys(ss)+reg_sp+ 2);
-	reg_dx=mem_readw(SegPhys(ss)+reg_sp+ 4);
-	reg_bx=mem_readw(SegPhys(ss)+reg_sp+ 6);
-	reg_si=mem_readw(SegPhys(ss)+reg_sp+ 8);
-	reg_di=mem_readw(SegPhys(ss)+reg_sp+10);
-	reg_bp=mem_readw(SegPhys(ss)+reg_sp+12);
-	SegSet16(ds,mem_readw(SegPhys(ss)+reg_sp+14));
-	SegSet16(es,mem_readw(SegPhys(ss)+reg_sp+16));
-	reg_sp+=18;
-}
+void RDTSC_rebase();
 
 extern bool force_sfn;
 extern uint8_t ZDRIVE_NUM;
@@ -134,14 +112,23 @@ void DOS_Terminate(uint16_t pspseg,bool tsr,uint8_t exitcode) {
 	/* Restore the SS:SP to the previous one */
 	SegSet16(ss,RealSeg(parentpsp.GetStack()));
 	reg_sp = RealOff(parentpsp.GetStack());		
-	/* Restore the old CS:IP from int 22h */
-	RestoreRegisters();
+	/* Restore registers */
+	reg_ax = real_readw(SegValue(ss),reg_sp+ 0);
+	reg_bx = real_readw(SegValue(ss),reg_sp+ 2);
+	reg_cx = real_readw(SegValue(ss),reg_sp+ 4);
+	reg_dx = real_readw(SegValue(ss),reg_sp+ 6);
+	reg_si = real_readw(SegValue(ss),reg_sp+ 8);
+	reg_di = real_readw(SegValue(ss),reg_sp+10);
+	reg_bp = real_readw(SegValue(ss),reg_sp+12);
+	SegSet16(ds,real_readw(SegValue(ss),reg_sp+14));
+	SegSet16(es,real_readw(SegValue(ss),reg_sp+16));
+	reg_sp+=18;
 	/* Set the CS:IP stored in int 0x22 back on the stack */
-	mem_writew(SegPhys(ss)+reg_sp+0,RealOff(old22));
-	mem_writew(SegPhys(ss)+reg_sp+2,RealSeg(old22));
+	real_writew(SegValue(ss),reg_sp+0,RealOff(old22));
+	real_writew(SegValue(ss),reg_sp+2,RealSeg(old22));
 	/* set IOPL=3 (Strike Commander), nested task set,
 	   interrupts enabled, test flags cleared */
-	mem_writew(SegPhys(ss)+reg_sp+4,0x7202);
+	real_writew(SegValue(ss),reg_sp+4,0x7202);
 	// Free memory owned by process
 	if (!tsr) DOS_FreeProcessMemory(pspseg);
 	DOS_UpdatePSPName();
@@ -150,6 +137,7 @@ void DOS_Terminate(uint16_t pspseg,bool tsr,uint8_t exitcode) {
 
 	CPU_AutoDetermineMode>>=CPU_AUTODETERMINE_SHIFT;
 	if (CPU_AutoDetermineMode&CPU_AUTODETERMINE_CYCLES) {
+		RDTSC_rebase();
 		CPU_CycleAutoAdjust=false;
 		CPU_CycleLeft=0;
 		CPU_Cycles=0;
@@ -251,11 +239,8 @@ bool DOS_ChildPSP(uint16_t segment, uint16_t size) {
 	psp.SetFCB1(RealMake(parent_psp_seg,0x5c));
 	psp.SetFCB2(RealMake(parent_psp_seg,0x6c));
 	psp.SetEnvironment(psp_parent.GetEnvironment());
+	psp.SetStack(psp_parent.GetStack());
 	psp.SetSize(size);
-	// push registers in case child PSP is terminated
-	SaveRegisters();
-	psp.SetStack(RealMakeSeg(ss,reg_sp));
-	reg_sp+=18;
 	return true;
 }
 
@@ -297,6 +282,8 @@ bool DOS_Execute(const char* name, PhysPt block_pt, uint8_t flags) {
 	PhysPt loadaddress;RealPt relocpt;
     uint32_t headersize = 0, imagesize = 0;
 	DOS_ParamBlock block(block_pt);
+	uint32_t checksum = 0;
+	uint32_t checksum_bytes = 0;
 
 	block.LoadData();
 	//Remove the loadhigh flag for the moment!
@@ -424,6 +411,7 @@ bool DOS_Execute(const char* name, PhysPt block_pt, uint8_t flags) {
 	} else loadseg=block.overlay.loadseg;
 	/* Load the executable */
 	loadaddress=PhysMake(loadseg,0);
+	RunningProgramLoadAddress = loadaddress;
 
 	if (iscom) {	/* COM Load 64k - 256 bytes max */
 		/* how big is the COM image? make sure it fits */
@@ -435,18 +423,24 @@ bool DOS_Execute(const char* name, PhysPt block_pt, uint8_t flags) {
 
 		pos=0;DOS_SeekFile(fhandle,&pos,DOS_SEEK_SET);	
 		DOS_ReadFile(fhandle,loadbuf,&readsize);
+		checksum = crc32(checksum, loadbuf, readsize);
+		checksum_bytes += readsize;
 		MEM_BlockWrite(loadaddress,loadbuf,readsize);
 	} else {	/* EXE Load in 32kb blocks and then relocate */
 		if (imagesize > (unsigned int)(memsize*0x10)) E_Exit("DOS:Not enough memory for EXE image");
 		pos=headersize;DOS_SeekFile(fhandle,&pos,DOS_SEEK_SET);	
 		while (imagesize>0x7FFF) {
 			readsize=0x8000;DOS_ReadFile(fhandle,loadbuf,&readsize);
+			checksum = crc32(checksum, loadbuf, readsize);
+			checksum_bytes += readsize;
 			MEM_BlockWrite(loadaddress,loadbuf,readsize);
 //			if (readsize!=0x8000) LOG(LOG_EXEC,LOG_NORMAL)("Illegal header");
 			loadaddress+=0x8000;imagesize-=0x8000;
 		}
 		if (imagesize>0) {
 			readsize=(uint16_t)imagesize;DOS_ReadFile(fhandle,loadbuf,&readsize);
+			checksum = crc32(checksum, loadbuf, readsize);
+			checksum_bytes += readsize;
 			MEM_BlockWrite(loadaddress,loadbuf,readsize);
 //			if (readsize!=imagesize) LOG(LOG_EXEC,LOG_NORMAL)("Illegal header");
 		}
@@ -471,7 +465,7 @@ bool DOS_Execute(const char* name, PhysPt block_pt, uint8_t flags) {
 		SetupPSP(pspseg,memsize,envseg);
 		SetupCMDLine(pspseg,block);
 	}
-	CALLBACK_SCF(false);		/* Carry flag cleared for caller if successfull */
+	CALLBACK_SCF(false);		/* Carry flag cleared for caller if successful */
     if(flags == OVERLAY) {
         reg_ax = 0;             // Testing with MS-DOS (6.22) shows that if INT 21 AX=4B is called with the overlay flag (AL==3), then AX and DX are 0 on return.
         reg_dx = 0;
@@ -510,8 +504,8 @@ bool DOS_Execute(const char* name, PhysPt block_pt, uint8_t flags) {
 
 	if ((flags == LOAD) || (flags == LOADNGO)) {
 		/* Get Caller's program CS:IP of the stack and set termination address to that */
-		RealSetVec(0x22,RealMake(mem_readw(SegPhys(ss)+reg_sp+2),mem_readw(SegPhys(ss)+reg_sp)));
-		SaveRegisters();
+		RealSetVec(0x22,RealMake(real_readw(SegValue(ss),reg_sp+2),real_readw(SegValue(ss),reg_sp)));
+		reg_sp-=18;
 		DOS_PSP callpsp(dos.psp());
 		/* Save the SS:SP on the PSP of calling program */
 		callpsp.SetStack(RealMakeSeg(ss,reg_sp));
@@ -554,6 +548,10 @@ bool DOS_Execute(const char* name, PhysPt block_pt, uint8_t flags) {
 		DOS_MCB pspmcb(dos.psp()-1);
 		pspmcb.SetFileName(stripname);
 		DOS_UpdatePSPName();
+		RunningProgramHash[0] = head.checksum;
+		RunningProgramHash[1] = checksum_bytes;
+		RunningProgramHash[2] = checksum;
+		RunningProgramHash[3] = 0;
 	}
 
 	if (flags==LOAD) {

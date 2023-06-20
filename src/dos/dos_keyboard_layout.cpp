@@ -16,6 +16,7 @@
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
  */
 
+#include <assert.h>
 #include <set>
 
 #include "dosbox.h"
@@ -41,10 +42,15 @@
 #include <windows.h>
 #endif
 
+#include <output/output_ttf.h>
+
 int lastcp = 0;
 void DOSBox_SetSysMenu(void);
 bool OpenGL_using(void), isDBCSCP(void);
-void change_output(int output), JFONT_Init(void), UpdateSDLDrawTexture();
+void change_output(int output), UpdateSDLDrawTexture();
+void SwitchLanguage(int oldcp, int newcp, bool confirm);
+void MSG_Init(), JFONT_Init(), runRescan(const char *str);
+extern int tryconvertcp, toSetCodePage(DOS_Shell *shell, int newCP, int opt);
 extern bool jfont_init;
 static FILE* OpenDosboxFile(const char* name) {
 	uint8_t drive;
@@ -651,8 +657,16 @@ bool keyboard_layout::map_key(Bitu key, uint16_t layouted_key, bool is_command, 
 	return false;
 }
 
+uint16_t GetDefaultCP() {
+    if (IS_PC98_ARCH||IS_JEGA_ARCH||IS_JDOSV) return 932;
+    else if (IS_KDOSV) return 949;
+    else if (IS_PDOSV) return 936;
+    else if (IS_TDOSV) return 950;
+    return 437;
+}
+
 uint16_t keyboard_layout::extract_codepage(const char* keyboard_file_name) {
-	if (!strcmp(keyboard_file_name,"none")) return (IS_PC98_ARCH || IS_JEGA_ARCH || IS_JDOSV ? 932 : (IS_KDOSV ? 949 : (IS_PDOSV ? 936 : (IS_TDOSV ? 950 : 437))));
+	if (!strcmp(keyboard_file_name,"none")) return GetDefaultCP();
 
 	uint32_t read_buf_size;
 	static uint8_t read_buf[65535];
@@ -714,7 +728,7 @@ uint16_t keyboard_layout::extract_codepage(const char* keyboard_file_name) {
 		} else {
 			start_pos=0;
 			LOG(LOG_BIOS,LOG_ERROR)("Keyboard layout file %s not found",keyboard_file_name);
-			return (IS_PC98_ARCH || IS_JEGA_ARCH || IS_JDOSV ? 932 : (IS_KDOSV ? 949 : (IS_PDOSV ? 936 : (IS_TDOSV ? 950 : 437))));
+			return GetDefaultCP();
 		}
 		if (tempfile) {
 			fseek(tempfile, long(start_pos+2), SEEK_SET);
@@ -727,7 +741,7 @@ uint16_t keyboard_layout::extract_codepage(const char* keyboard_file_name) {
 		uint32_t dr=(uint32_t)fread(read_buf, sizeof(uint8_t), 4, tempfile);
 		if ((dr<4) || (read_buf[0]!=0x4b) || (read_buf[1]!=0x4c) || (read_buf[2]!=0x46)) {
 			LOG(LOG_BIOS,LOG_ERROR)("Invalid keyboard layout file %s",keyboard_file_name);
-			return (IS_PC98_ARCH || IS_JEGA_ARCH ? 932 : (IS_KDOSV ? 949 : (IS_PDOSV ? 936 : (IS_TDOSV ? 950 : 437))));
+			return GetDefaultCP();
 		}
 
 		fseek(tempfile, 0, SEEK_SET);
@@ -751,7 +765,7 @@ uint16_t keyboard_layout::extract_codepage(const char* keyboard_file_name) {
 
 		if (submap_cp!=0) return submap_cp;
 	}
-	return (IS_PC98_ARCH || IS_JEGA_ARCH || IS_JDOSV ? 932 : (IS_KDOSV ? 949 : (IS_PDOSV ? 936 : (IS_TDOSV ? 950 : 437))));
+	return GetDefaultCP();
 }
 
 static uint8_t cpi_buf[65536];
@@ -774,9 +788,15 @@ bool font_14_init=false, font_16_init=false;
 uint8_t int10_font_14_init[256 * 14], int10_font_16_init[256 * 16];
 void initcodepagefont() {
     if (!dos.loaded_codepage) return;
+
+    /* If you don't load COUNTRY.SYS or do any codepage font commands on stock MS-DOS then
+     * there is no loading of it from disk at all */
+    if (GetDefaultCP() == dos.loaded_codepage) return;
+
 	uint32_t start_pos;
 	uint16_t number_of_codepages;
-	static uint8_t cpi_buf[65536];
+	static uint8_t cpi_buff[65536];
+	uint8_t *cpibuf = dos.loaded_codepage == 856 ? cpi_buff : cpi_buf;
 	uint32_t cpi_buf_size=0,size_of_cpxdata=0;
     switch (dos.loaded_codepage) {
 			case 437:	case 850:	case 852:	case 853:	case 857:	case 858:
@@ -838,11 +858,11 @@ void initcodepagefont() {
     }
     uint16_t found_at_pos=0x29+19;
     size_of_cpxdata=cpi_buf_size;
-    cpi_buf[found_at_pos]=0xcb;
+    cpibuf[found_at_pos]=0xcb;
     uint16_t seg=0;
-    uint16_t size=0x1500;
+    uint16_t size=0x2000; // NTS: Based on loading up to 64KB of CPI/CPX + assignment of stack pointer at seg+0x1000:0xFFFE. The old value 0x1500 caused crashes with low memory amounts.
     if (!DOS_AllocateMemory(&seg,&size)) return;
-    MEM_BlockWrite(((unsigned int)seg<<4u)+0x100u,cpi_buf,size_of_cpxdata);
+    MEM_BlockWrite(((unsigned int)seg<<4u)+0x100u,cpibuf,size_of_cpxdata);
     uint16_t save_ds=SegValue(ds);
     uint16_t save_es=SegValue(es);
     uint16_t save_ss=SegValue(ss);
@@ -856,39 +876,39 @@ void initcodepagefont() {
     SegSet16(es,save_es);
     SegSet16(ss,save_ss);
     reg_esp=save_esp;
-    MEM_BlockRead(((unsigned int)seg<<4u)+0x100u,cpi_buf,65536u);
+    MEM_BlockRead(((unsigned int)seg<<4u)+0x100u,cpibuf,65536u);
     cpi_buf_size=65536;
     DOS_FreeMemory(seg);
-	start_pos=host_readd(&cpi_buf[0x13]);
-	number_of_codepages=host_readw(&cpi_buf[start_pos]);
+	start_pos=host_readd(&cpibuf[0x13]);
+	number_of_codepages=host_readw(&cpibuf[start_pos]);
 	start_pos+=4;
 	for (uint16_t test_codepage=0; test_codepage<number_of_codepages; test_codepage++) {
 		uint16_t device_type, font_codepage, font_type;
-		device_type=host_readw(&cpi_buf[start_pos+0x04]);
-		font_codepage=host_readw(&cpi_buf[start_pos+0x0e]);
+		device_type=host_readw(&cpibuf[start_pos+0x04]);
+		font_codepage=host_readw(&cpibuf[start_pos+0x0e]);
 		uint32_t font_data_header_pt;
-		font_data_header_pt=host_readd(&cpi_buf[start_pos+0x16]);
-		font_type=host_readw(&cpi_buf[font_data_header_pt]);
+		font_data_header_pt=host_readd(&cpibuf[start_pos+0x16]);
+		font_type=host_readw(&cpibuf[font_data_header_pt]);
 		if ((device_type==0x0001) && (font_type==0x0001) && (font_codepage==dos.loaded_codepage)) {
-			uint16_t number_of_fonts=host_readw(&cpi_buf[font_data_header_pt+0x02]);
+			uint16_t number_of_fonts=host_readw(&cpibuf[font_data_header_pt+0x02]);
 			uint32_t font_data_start=font_data_header_pt+0x06;
 			for (uint16_t current_font=0; current_font<number_of_fonts; current_font++) {
-				uint8_t font_height=cpi_buf[font_data_start];
+				uint8_t font_height=cpibuf[font_data_start];
 				font_data_start+=6;
 				if (font_height==0x10) {
                     for (uint16_t i=0;i<256*16;i++)
-                        int10_font_16_init[i]=eurAscii>32&&i/16==eurAscii?euro_16[i%16]:cpi_buf[font_data_start+i];
+                        int10_font_16_init[i]=eurAscii>32&&i/16==eurAscii?euro_16[i%16]:cpibuf[font_data_start+i];
                     font_16_init=true;
 				} else if (font_height==0x0e) {
                     for (uint16_t i=0;i<256*14;i++)
-                        int10_font_14_init[i]=eurAscii>32&&i/14==eurAscii?euro_14[i%14]:cpi_buf[font_data_start+i];
+                        int10_font_14_init[i]=eurAscii>32&&i/14==eurAscii?euro_14[i%14]:cpibuf[font_data_start+i];
                     font_14_init=true;
                 }
 				font_data_start+=font_height*256u;
 			}
 			return;
 		}
-		start_pos=host_readd(&cpi_buf[start_pos]);
+		start_pos=host_readd(&cpibuf[start_pos]);
 		start_pos+=2;
 	}
 }
@@ -971,7 +991,7 @@ Bitu keyboard_layout::read_codepage_file(const char* codepage_file_name, int32_t
 	bool upxfound=false;
 	uint16_t found_at_pos=5;
 	if (tempfile==NULL) {
-		// check if build-in codepage is available
+		// check if built-in codepage is available
 		// reference: https://gitlab.com/FreeDOS/base/cpidos/-/blob/master/DOC/CPIDOS/CODEPAGE.TXT
 		switch (codepage_id) {
 			case 437:	case 850:	case 852:	case 853:	case 857:	case 858:
@@ -1383,6 +1403,32 @@ Bitu DOS_SwitchKeyboardLayout(const char* new_layout, int32_t& tried_cp) {
 	} else return 0xff;
 }
 
+
+Bitu DOS_ChangeKeyboardLayout(const char* layoutname, int32_t codepage) {
+    keyboard_layout* temp_layout = new keyboard_layout();
+    // try to read the layout for the specified codepage
+    Bitu kerrcode = temp_layout->read_keyboard_file(layoutname, codepage);
+    if(kerrcode) {
+        delete temp_layout;
+        return kerrcode;
+    }
+    // Everything went fine, switch to new layout
+    loaded_layout = temp_layout;
+    return KEYB_NOERROR;
+}
+
+Bitu DOS_ChangeCodepage(int32_t codepage, const char* codepagefile) {
+    keyboard_layout* temp_layout = new keyboard_layout();
+    // try to read the layout for the specified codepage
+    Bitu kerrcode = temp_layout->read_codepage_file(codepagefile, codepage);
+    if(kerrcode) {
+        delete temp_layout;
+        return kerrcode;
+    }
+    // Everything went fine
+    return KEYB_NOERROR;
+}
+
 // get currently loaded layout name (NULL if no layout is loaded)
 const char* DOS_GetLoadedLayout(void) {
 	if (loaded_layout) {
@@ -1396,9 +1442,12 @@ public:
 	DOS_KeyboardLayout(Section* configuration):Module_base(configuration){
         const Section_prop* section = static_cast<Section_prop*>(configuration);
 		const char * layoutname=section->Get_string("keyboardlayout");
-		dos.loaded_codepage=(IS_PC98_ARCH || IS_JEGA_ARCH || IS_JDOSV ? 932 : (IS_KDOSV ? 949 : (IS_PDOSV ? 936 : (IS_TDOSV ? 950 : 437))));	// US codepage already initialized
+		dos.loaded_codepage = GetDefaultCP();	// default codepage already initialized
         int tocp=!strcmp(layoutname, "jp")||IS_JDOSV?932:(!strcmp(layoutname, "ko")||IS_KDOSV?949:(!strcmp(layoutname, "tw")||!strcmp(layoutname, "hk")||!strcmp(layoutname, "zht")||IS_TDOSV?950:(!strcmp(layoutname, "cn")||!strcmp(layoutname, "zh")||!strcmp(layoutname, "zhs")||IS_PDOSV?936:(!strcmp(layoutname, "us")?437:0))));
-        if (tocp) layoutname="us";
+#if defined(WIN32)
+		if (dos.loaded_codepage == 932 && !IS_PC98_ARCH && GetKeyboardType(0) == 7 && !strcmp(layoutname, "auto")) layoutname = "jp106";
+#endif
+        if (tocp && strcmp(layoutname, "jp106") && strcmp(layoutname, "jp") && strcmp(layoutname, "ko")) layoutname="us";
 
 #if defined(USE_TTF)
         if (TTF_using()) setTTFCodePage(); else
@@ -1433,6 +1482,12 @@ public:
 /*				case 1026: // Bulgaria, CP 915, Alt CP 850
 					layoutname = "bg241";
 					break; */
+				case 1028: // Taiwan, CP 950, Alt CP 951
+					if (tryconvertcp == 1) {
+						layoutname = "us";
+						tocp = 950;
+					}
+					break;
 				case 1029: // Czech Republic, CP 852, Alt CP 850
 					layoutname = "cz243";
 					break;
@@ -1441,12 +1496,12 @@ public:
 					break;
 				case 1031: // Germany, CP 850, Alt CP 437
 					layoutname = "gr";
-					wants_dos_codepage = (IS_PC98_ARCH || IS_JEGA_ARCH || IS_JDOSV ? 932 : (IS_KDOSV ? 949 : (IS_PDOSV ? 936 : (IS_TDOSV ? 950 : 437))));
+					wants_dos_codepage = GetDefaultCP();
 					break;
 				case 1033: // US, CP 437
 #if defined(HX_DOS)
                     layoutname = "us";
-                    wants_dos_codepage = (IS_PC98_ARCH || IS_JEGA_ARCH || IS_JDOSV ? 932 : (IS_KDOSV ? 949 : (IS_PDOSV ? 936 : (IS_TDOSV ? 950 : 437))));
+                    wants_dos_codepage = GetDefaultCP();
                     break;
 #endif
 					return;
@@ -1455,15 +1510,15 @@ public:
 					break;
 				case 1034: // Spain, CP 850, Alt CP 437
 					layoutname = "sp";
-					wants_dos_codepage = (IS_PC98_ARCH || IS_JEGA_ARCH || IS_JDOSV ? 932 : (IS_KDOSV ? 949 : (IS_PDOSV ? 936 : (IS_TDOSV ? 950 : 437))));
+					wants_dos_codepage = GetDefaultCP();
 					break;
 				case 1035: // Finland, CP 850, Alt CP 437
 					layoutname = "su";
-					wants_dos_codepage = (IS_PC98_ARCH || IS_JEGA_ARCH || IS_JDOSV ? 932 : (IS_KDOSV ? 949 : (IS_PDOSV ? 936 : (IS_TDOSV ? 950 : 437))));
+					wants_dos_codepage = GetDefaultCP();
 					break;
 				case 1036: // France, CP 850, Alt CP 437
 					layoutname = "fr";
-					wants_dos_codepage = (IS_PC98_ARCH || IS_JEGA_ARCH || IS_JDOSV ? 932 : (IS_KDOSV ? 949 : (IS_PDOSV ? 936 : (IS_TDOSV ? 950 : 437))));
+					wants_dos_codepage = GetDefaultCP();
 					break;
 				case 1038: // Hungary, CP 852, Alt CP 850
 					if (cur_kb_subID==1) layoutname = "hu";
@@ -1474,11 +1529,23 @@ public:
 					break;
 				case 1040: // Italy, CP 850, Alt CP 437
 					layoutname = "it";
-					wants_dos_codepage = (IS_PC98_ARCH || IS_JEGA_ARCH || IS_JDOSV ? 932 : (IS_KDOSV ? 949 : (IS_PDOSV ? 936 : (IS_TDOSV ? 950 : 437))));
+					wants_dos_codepage = GetDefaultCP();
+					break;
+				case 1041: // Japan, CP 932
+					if (tryconvertcp == 1) {
+						layoutname = "jp";
+						tocp = 932;
+					}
+					break;
+				case 1042: // Korea, CP 949
+					if (tryconvertcp == 1) {
+						layoutname = "ko";
+						tocp = 949;
+					}
 					break;
 				case 1043: // Netherlands, CP 850, Alt CP 437
 					layoutname = "nl";
-					wants_dos_codepage = (IS_PC98_ARCH || IS_JEGA_ARCH || IS_JDOSV ? 932 : (IS_KDOSV ? 949 : (IS_PDOSV ? 936 : (IS_TDOSV ? 950 : 437))));
+					wants_dos_codepage = GetDefaultCP();
 					break;
 				case 1044: // Norway, CP 850, Alt CP 865
 					layoutname = "no";
@@ -1488,14 +1555,14 @@ public:
 					break;
 				case 1046: // Brazil, CP 850, Alt CP 437
 					layoutname = "br";
-					wants_dos_codepage = (IS_PC98_ARCH || IS_JEGA_ARCH || IS_JDOSV ? 932 : (IS_KDOSV ? 949 : (IS_PDOSV ? 936 : (IS_TDOSV ? 950 : 437))));
+					wants_dos_codepage = GetDefaultCP();
 					break;
 /*				case 1048: // Romania, CP  852, Alt CP 850
 					layoutname = "ro446";
 					break; */
 				case 1049: // Russia, CP  866, Alt CP 915
 					layoutname = "ru";
-					wants_dos_codepage = (IS_PC98_ARCH || IS_JEGA_ARCH || IS_JDOSV ? 932 : (IS_KDOSV ? 949 : (IS_PDOSV ? 936 : (IS_TDOSV ? 950 : 437))));
+					wants_dos_codepage = GetDefaultCP();
 					break;
 				case 1050: // Croatia, CP 852, Alt CP 850
 					layoutname = "hr";
@@ -1508,14 +1575,14 @@ public:
 					break; */
 				case 1053: // Sweden, CP 850, Alt CP 437
 					layoutname = "sv";
-					wants_dos_codepage = (IS_PC98_ARCH || IS_JEGA_ARCH || IS_JDOSV ? 932 : (IS_KDOSV ? 949 : (IS_PDOSV ? 936 : (IS_TDOSV ? 950 : 437))));
+					wants_dos_codepage = GetDefaultCP();
 					break;
 				case 1055: // Turkey, CP 857
 					layoutname = "tr";
 					break;
 				case 1058: // Ukraine, CP 848?
 					layoutname = "ur";
-					wants_dos_codepage = (IS_PC98_ARCH || IS_JEGA_ARCH || IS_JDOSV ? 932 : (IS_KDOSV ? 949 : (IS_PDOSV ? 936 : (IS_TDOSV ? 950 : 437))));
+					wants_dos_codepage = GetDefaultCP();
 					break;
 				case 1059: // Belarus, CP 849?
 					layoutname = "bl";
@@ -1541,67 +1608,76 @@ public:
 				case 1067: // Armenian, has no DOS CP
 					layoutname = "hy";
 					break; */
+				case 2052: // China, CP 936
+					if (tryconvertcp == 1) {
+						layoutname = "us";
+						tocp = 936;
+					}
+					break;
 				case 2055: // Swiss-German, CP 850, Alt CP 437
 					layoutname = "sg";
-					wants_dos_codepage = (IS_PC98_ARCH || IS_JEGA_ARCH || IS_JDOSV ? 932 : (IS_KDOSV ? 949 : (IS_PDOSV ? 936 : (IS_TDOSV ? 950 : 437))));
+					wants_dos_codepage = GetDefaultCP();
 					break;
 				case 2057: // UK, CP 850, Alt CP 437
 					layoutname = "uk"; 
-					wants_dos_codepage = (IS_PC98_ARCH || IS_JEGA_ARCH || IS_JDOSV ? 932 : (IS_KDOSV ? 949 : (IS_PDOSV ? 936 : (IS_TDOSV ? 950 : 437))));
+					wants_dos_codepage = GetDefaultCP();
 					break;
 				case 2060: // Belgium-French, CP 850, Alt CP 437
 					layoutname = "be";
-					wants_dos_codepage = (IS_PC98_ARCH || IS_JEGA_ARCH || IS_JDOSV ? 932 : (IS_KDOSV ? 949 : (IS_PDOSV ? 936 : (IS_TDOSV ? 950 : 437))));
+					wants_dos_codepage = GetDefaultCP();
 					break;
 				case 2064: // Swiss-Italian, CP 850, Alt CP 437
 					layoutname = "sf"; // Uses Swiss-French
-					wants_dos_codepage = (IS_PC98_ARCH || IS_JEGA_ARCH || IS_JDOSV ? 932 : (IS_KDOSV ? 949 : (IS_PDOSV ? 936 : (IS_TDOSV ? 950 : 437))));
+					wants_dos_codepage = GetDefaultCP();
 					break;
 				case 2067: // Belgium-Dutch, CP 850, Alt CP 437
 					layoutname = "be";
-					wants_dos_codepage = (IS_PC98_ARCH || IS_JEGA_ARCH || IS_JDOSV ? 932 : (IS_KDOSV ? 949 : (IS_PDOSV ? 936 : (IS_TDOSV ? 950 : 437))));
+					wants_dos_codepage = GetDefaultCP();
 					break;
 				case 2070: // Portugal, CP 850, Alt CP 860
 					layoutname = "po";
 					break;
+				case 3076: // Hong Kong, CP 950, Alt CP 951
+					if (tryconvertcp == 1) {
+						layoutname = "us";
+						tocp = 950;
+					}
+					break;
 				case 3081: // Australia, CP 850, Alt CP 437
 					layoutname = "us"; 
-					wants_dos_codepage = (IS_PC98_ARCH || IS_JEGA_ARCH || IS_JDOSV ? 932 : (IS_KDOSV ? 949 : (IS_PDOSV ? 936 : (IS_TDOSV ? 950 : 437))));
+					wants_dos_codepage = GetDefaultCP();
 					break;
 				case 3184: // Canada-French, CP 850, Alt CP 863
 					layoutname = "cf";
-					wants_dos_codepage = (IS_PC98_ARCH || IS_JEGA_ARCH || IS_JDOSV ? 932 : (IS_KDOSV ? 949 : (IS_PDOSV ? 936 : (IS_TDOSV ? 950 : 437))));
+					wants_dos_codepage = GetDefaultCP();
 					break;
 				case 4103: // Luxembourg-German, CP 850, Alt CP 437
 					layoutname = "sf"; // Official, but BE and DE are also common
-					wants_dos_codepage = (IS_PC98_ARCH || IS_JEGA_ARCH || IS_JDOSV ? 932 : (IS_KDOSV ? 949 : (IS_PDOSV ? 936 : (IS_TDOSV ? 950 : 437))));
+					wants_dos_codepage = GetDefaultCP();
 					break;
 				case 4105: // Canada-English, CP 850, Alt CP 437
 					layoutname = "ca";
-					wants_dos_codepage = (IS_PC98_ARCH || IS_JEGA_ARCH || IS_JDOSV ? 932 : (IS_KDOSV ? 949 : (IS_PDOSV ? 936 : (IS_TDOSV ? 950 : 437))));
+					wants_dos_codepage = GetDefaultCP();
 					break;
 				case 4108: // Swiss-French, CP 850, Alt CP 437
 					layoutname = "sf";
-					wants_dos_codepage = (IS_PC98_ARCH || IS_JEGA_ARCH || IS_JDOSV ? 932 : (IS_KDOSV ? 949 : (IS_PDOSV ? 936 : (IS_TDOSV ? 950 : 437))));
+					wants_dos_codepage = GetDefaultCP();
 					break;
 				case 4127: // Liechtenstein, CP 850, Alt CP 437
 					layoutname = "sg"; // Uses Swiss-German
-					wants_dos_codepage = (IS_PC98_ARCH || IS_JEGA_ARCH || IS_JDOSV ? 932 : (IS_KDOSV ? 949 : (IS_PDOSV ? 936 : (IS_TDOSV ? 950 : 437))));
+					wants_dos_codepage = GetDefaultCP();
 					break;
 				case 5129: // New-Zealand, CP 850, Alt CP 437
 					layoutname = "us"; 
-					wants_dos_codepage = (IS_PC98_ARCH || IS_JEGA_ARCH || IS_JDOSV ? 932 : (IS_KDOSV ? 949 : (IS_PDOSV ? 936 : (IS_TDOSV ? 950 : 437))));
+					wants_dos_codepage = GetDefaultCP();
 					break;
 				case 5132: // Luxembourg-French, CP 840, Alt CP 437
 					layoutname = "sf"; // Official, but BE and DE are also common
-					wants_dos_codepage = (IS_PC98_ARCH || IS_JEGA_ARCH || IS_JDOSV ? 932 : (IS_KDOSV ? 949 : (IS_PDOSV ? 936 : (IS_TDOSV ? 950 : 437))));
+					wants_dos_codepage = GetDefaultCP();
 					break;
 				case 6153: // Ireland, CP 850, Alt CP 437
 					layoutname = "uk"; 
-					wants_dos_codepage = (IS_PC98_ARCH || IS_JEGA_ARCH || IS_JDOSV ? 932 : (IS_KDOSV ? 949 : (IS_PDOSV ? 936 : (IS_TDOSV ? 950 : 437))));
-					break;
-				case 1041: // Japan, CP 943, Alt CP 942
-					layoutname = "jp";
+					wants_dos_codepage = GetDefaultCP();
 					break;
 				default:
 					break;
@@ -1636,24 +1712,34 @@ public:
 			}
 		}
         if (tocp && !IS_PC98_ARCH) {
-            dos.loaded_codepage=tocp;
-            if (!jfont_init && isDBCSCP()) JFONT_Init();
-            SetupDBCSTable();
+            if(dos.loaded_codepage == 932 && !strcmp(layoutname, "jp106")) loaded_layout->read_keyboard_file(layoutname, dos.loaded_codepage);
+
+            uint16_t cpbak = dos.loaded_codepage;
 #if defined(USE_TTF)
-            if (TTF_using()) setTTFCodePage(); else
+            if (ttf.inUse)
+                toSetCodePage(NULL, tocp, -1);
+            else
 #endif
-            DOSBox_SetSysMenu();
+            {
+                dos.loaded_codepage = tocp;
+                MSG_Init();
+                DOSBox_SetSysMenu();
+                if (!jfont_init && isDBCSCP()) JFONT_Init();
+                SetupDBCSTable();
+                runRescan("-A -Q");
 #if C_OPENGL && DOSBOXMENU_TYPE == DOSBOXMENU_SDLDRAW
-            if (OpenGL_using() && control->opt_lang.size() && lastcp && lastcp != dos.loaded_codepage)
-                UpdateSDLDrawTexture();
+                if (OpenGL_using() && control->opt_lang.size() && lastcp && lastcp != dos.loaded_codepage)
+                    UpdateSDLDrawTexture();
 #endif
+            }
+            SwitchLanguage(cpbak, dos.loaded_codepage, false);
         }
 	}
 
 	~DOS_KeyboardLayout(){
-		if ((dos.loaded_codepage!=(IS_PC98_ARCH || IS_JEGA_ARCH || IS_JDOSV ? 932 : (IS_KDOSV ? 949 : (IS_PDOSV ? 936 : (IS_TDOSV ? 950 : 437))))) && (CurMode->type==M_TEXT)) {
+		if ((dos.loaded_codepage!=GetDefaultCP()) && (CurMode->type==M_TEXT)) {
 			INT10_ReloadRomFonts();
-			dos.loaded_codepage=(IS_PC98_ARCH || IS_JEGA_ARCH || IS_JDOSV ? 932 : (IS_KDOSV ? 949 : (IS_PDOSV ? 936 : (IS_TDOSV ? 950 : 437))));	// US codepage
+			dos.loaded_codepage=GetDefaultCP();	// default codepage
 		}
 		if (loaded_layout) {
 			delete loaded_layout;
@@ -1689,7 +1775,7 @@ void DOS_KeyboardLayout_Init() {
 
 static const std::set<int> supportedCodepages =
 {
-	437, 737, 775, 808, 850, 852, 853, 855, 857, 858, 860, 861, 862, 863, 864, 865, 866, 869, 872, 874,
+	437, 737, 775, 808, 850, 852, 853, 855, 856, 857, 858, 859, 860, 861, 862, 863, 864, 865, 866, 867, 868, 869, 872, 874,
 	932, 936, 949, 950, 951, 1250, 1251, 1252, 1253, 1254, 1255, 1256, 1257, 1258, 3021
 };
 

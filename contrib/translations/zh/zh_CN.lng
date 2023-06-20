@@ -1,6 +1,6 @@
 :DOSBOX-X:LANGUAGE:Simplified Chinese
 :DOSBOX-X:CODEPAGE:936
-:DOSBOX-X:VERSION:0.83.25
+:DOSBOX-X:VERSION:2023.05.01
 :DOSBOX-X:REMARK:建议将国家和代码页设为 86,936 并搭配中文字体; 或使用 chs 或 cn 中文 DOS/V 模式以直接支持中文显示和打印
 :AUTOEXEC_CONFIGFILE_HELP
 Lines in this section will be run at startup.
@@ -220,12 +220,6 @@ IDE 位置
 .
 :SLOT
 存档
-.
-:PREVIOUS_PAGE
-< 上一页
-.
-:NEXT_PAGE
-       下一页 >
 .
 :SELECT_EVENT
 选择要修改的事件.
@@ -891,7 +885,7 @@ DOSBox-X 提供多层次的光驱模拟.
 
 此命令的语法为如下之一:
 
-[34;1mBOOT [驱动器盘符:][0m
+[34;1mBOOT [驱动器盘符:] [-convertfat|-convertfatro|-noconvertfat][0m
 
 [34;1mBOOT diskimg1.img [diskimg2.img ...] [-L 驱动器盘符][0m
 
@@ -1252,6 +1246,107 @@ BIOSTEST 镜像文件
 必须指定介于 1 和 9 之间的端口号.
 
 .
+:PROGRAM_VHDMAKE_WRITERR
+Could not write to new VHD image "%s", aborting.
+
+.
+:PROGRAM_VHDMAKE_REMOVEERR
+Could not erase file "%s"
+
+.
+:PROGRAM_VHDMAKE_RENAME
+You'll have to manually rename the newly created VHD image.
+
+.
+:PROGRAM_VHDMAKE_SUCCESS
+New VHD image succesfully created. You can mount it with [34;1mIMGMOUNT[0m.
+
+.
+:PROGRAM_VHDMAKE_ERROPEN
+Error, could not open image file "%s".
+
+.
+:PROGRAM_VHDMAKE_BADSIZE
+Bad VHD size specified, aborting!
+
+.
+:PROGRAM_VHDMAKE_FNEEDED
+A pre-existing VHD image can't be silently overwritten without -f option!
+
+.
+:PROGRAM_VHDMAKE_BADPARENT
+The parent VHD image "%s" can't be opened for linking, aborting!
+
+.
+:PROGRAM_VHDMAKE_NOINFO
+Couldn't query info for "%s".
+
+.
+:PROGRAM_VHDMAKE_BLOCKSTATS
+with %d/%d blocks allocated.
+
+.
+:PROGRAM_VHDMAKE_INFO
+VHD "%s" type is %s.
+Its virtual size is %.02f MB
+
+.
+:PROGRAM_VHDMAKE_CANTMERGE
+%s is not a Differencing disk, can't merge!
+
+.
+:PROGRAM_VHDMAKE_MERGEREPORT
+%d sectors in %d blocks from "%s" merged into "%s".
+
+.
+:PROGRAM_VHDMAKE_MERGENODELETE
+Couldn't remove snapshot "%s", you'll have to do it yourself!
+
+.
+:PROGRAM_VHDMAKE_MERGEOKDELETE
+Snapshot VHD merged and deleted.
+
+.
+:PROGRAM_VHDMAKE_MERGEFAILED
+Failure while merging, aborted!
+.
+:PROGRAM_VHDMAKE_MERGEWARNCORRUPTION
+Parent "%s" contents could be corrupted!
+
+.
+:PROGRAM_VHDMAKE_ABSPATH_WIN
+Warning: an absolute path to parent limits portability to Windows.
+Please prefer a path relative to differencing image file!
+
+.
+:PROGRAM_VHDMAKE_ABSPATH_UX
+ERROR: an absolute path to parent inhibits portability.
+Use a path relative to differencing image file!
+
+.
+:PROGRAM_VHDMAKE_HELP
+Creates Dynamic or Differencing VHD images, or converts raw images
+into Fixed VHD.
+[32;1mVHDMAKE[0m [-f] new.vhd size[BKMGT]
+[32;1mVHDMAKE[0m [34;1m-convert[0m raw.hdd new.vhd
+[32;1mVHDMAKE[0m [-f] [34;1m-link[0m parent.vhd new.vhd
+[32;1mVHDMAKE[0m [34;1m-merge[0m delta.vhd
+[32;1mVHDMAKE[0m [34;1m-info[0m a.vhd
+ -c | -convert  convert a raw hd image to Fixed VHD, renaming it to new.vhd
+ -l | -link     create a new Differencing VHD new.vhd and link it to the
+                pre-existing parent image parent.vhd
+ -f | -force    force overwriting a pre-existing image file
+ -i | -info     show useful informations about a.vhd image
+ -m | -merge    merge differencing delta.vhd to its parent
+ new.vhd        name of the new Dynamic VHD image to create
+ size           disk size (eventually with size unit, Bytes is implicit)
+When converting a raw disk image to Fixed VHD, it has to be partitioned with
+MBR scheme and formatted with FAT format.
+When creating a Dynamic VHD, its size must range from 3 MB to 2040 GB.
+The Dynamic VHD created is not partitioned nor formatted: to directly mount to
+a drive letter with [34;1mIMGMOUNT[0m, please consider using [34;1mIMGMAKE[0m instead.
+A merged snapshot VHD is automatically deleted if merge is successful.
+.
 :SHELL_CMD_TREE_ERROR
 不存在子目录
 
@@ -1470,11 +1565,11 @@ GOTO: 标签 %s 找不到.
 
 .
 :SHELL_CMD_DIR_BYTES_USED
-%5d 个文件 %17s 字节
+%5d 个文件 %18s 字节
 
 .
 :SHELL_CMD_DIR_BYTES_FREE
-%5d 个目录 %17s 可用字节
+%5d 个目录 %18s 可用字节
 
 .
 :SHELL_CMD_DIR_FILES_LISTED
@@ -2089,17 +2184,17 @@ ASSOC [.扩展名[=命令] ... ]
 .
 :SHELL_CMD_CHCP_HELP_LONG
 CHCP [nnn [文件]]
+CHCP nnn[:[语言]]
 
   nnn   指定代码页.
   文件  指定代码页文件.
+  语言  指定相应的语言.
 
 TrueType 字体输出方式所支持的代码页包括:
 
-437,737,775,808,850,852,853,855,857,858,860-866,869,872,874,3021
+437,737,775,808,850,852,853,855-869,872,874,1250-1258,3021
 
-Windows 代码页: 1250,1251,1252,1253,1254,1255,1256,1257,1258
-
-以及双字节代码页,包括: 932, 936, 949, 950
+以及双字节代码页,包括: 932, 936, 949, 950/951
 
 通过提供代码页文件支持自定义代码页.
 
@@ -2541,6 +2636,12 @@ xBRZ
 :MENU:scaler_set_xbrz_bilinear
 xBRZ Bilinear
 .
+:MENU:set_titletext
+设置标题栏文字...
+.
+:MENU:set_transparency
+设置透明度...
+.
 :MENU:refresh_rate
 调整刷新率...
 .
@@ -2564,6 +2665,9 @@ OpenGL perfect
 .
 :MENU:output_ttf
 TrueType 字体
+.
+:MENU:output_gamelink
+Game Link
 .
 :MENU:doublescan
 双重扫描
@@ -2853,6 +2957,15 @@ EMM386 模拟
 :MENU:dos_ems_false
 禁用 EMS 内存模拟
 .
+:MENU:DOSDiskRateMenu
+限制磁盘传输速度
+.
+:MENU:limit_hdd_rate
+限制硬盘数据速率
+.
+:MENU:limit_floppy_rate
+限制软盘数据速率
+.
 :MENU:DOSWinMenu
 主机系统程序
 .
@@ -2975,6 +3088,9 @@ MPEG-TS + H.264
 .
 :MENU:drive_bootimg
 从磁盘镜像启动
+.
+:MENU:drive_saveimg
+保存到磁盘镜像
 .
 :MENU:HelpMenu
 帮助
@@ -3234,8 +3350,8 @@ DOS 命令
 :MENU:restartconf
 重启 DOSBox-X 并调用指定配置文件...
 .
-:MENU:restartlang
-重启 DOSBox-X 并调用指定语言文件...
+:MENU:loadlang
+加载语言文件...
 .
 :MENU:auto_lock_mouse
 自动锁定鼠标

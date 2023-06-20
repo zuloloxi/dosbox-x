@@ -39,6 +39,8 @@
 #include "../../ints/int10.h"
 #include "sdlmain.h"
 
+#include <output/output_ttf.h>
+
 #if defined(USE_TTF)
 extern unsigned char DOSBoxTTFbi[48868];
 extern bool printfont;
@@ -338,11 +340,17 @@ void CPrinter::updateFont()
     std::string exepath=GetDOSBoxXPath();
     struct stat wstat;
     if (stat(fontName.c_str(),&wstat)) {
-        std::string configfont, name = fontName;
+        std::string configfont, resfont, name = fontName;
         Cross::GetPlatformConfigDir(configfont);
         configfont += fontName;
         fontName = configfont;
-        if (stat(fontName.c_str(),&wstat) && exepath.size()) fontName = exepath + CROSS_FILESPLIT + name;
+        if (stat(fontName.c_str(),&wstat)) {
+            fontName = name;
+            Cross::GetPlatformResDir(resfont);
+            resfont += fontName;
+            fontName = resfont;
+            if (stat(fontName.c_str(),&wstat) && exepath.size()) fontName = exepath + CROSS_FILESPLIT + name;
+        }
     }
     if ((printdbcs==1 || (printdbcs==-1 && (isJEGAEnabled() || IS_DOSV || ((TTF_using() || showdbcs)
 #if defined(USE_TTF)
@@ -351,19 +359,31 @@ void CPrinter::updateFont()
     )))) && (IS_PC98_ARCH || isDBCSCP()) && stat(fontName.c_str(),&wstat)) {
         fontName = basedir + "SarasaGothicFixed.ttf";
         if (stat(fontName.c_str(),&wstat)) {
-            std::string configfont, name = fontName;
+            std::string configfont, resfont, name = fontName;
             Cross::GetPlatformConfigDir(configfont);
             configfont += fontName;
             fontName = configfont;
-            if (stat(fontName.c_str(),&wstat) && exepath.size()) fontName = exepath + CROSS_FILESPLIT + name;
             if (stat(fontName.c_str(),&wstat)) {
-                fontName = "SarasaGothicFixed.ttf";
+                fontName = name;
+                Cross::GetPlatformResDir(resfont);
+                resfont += fontName;
+                fontName = resfont;
+                if (stat(fontName.c_str(),&wstat) && exepath.size()) fontName = exepath + CROSS_FILESPLIT + name;
                 if (stat(fontName.c_str(),&wstat)) {
-                    std::string configfont, name = fontName;
-                    Cross::GetPlatformConfigDir(configfont);
-                    configfont += fontName;
-                    fontName = configfont;
-                    if (stat(fontName.c_str(),&wstat) && exepath.size()) fontName = exepath + CROSS_FILESPLIT + name;
+                    fontName = "SarasaGothicFixed.ttf";
+                    if (stat(fontName.c_str(),&wstat)) {
+                        std::string configfont, resfont, name = fontName;
+                        Cross::GetPlatformConfigDir(configfont);
+                        configfont += fontName;
+                        fontName = configfont;
+                        if (stat(fontName.c_str(),&wstat)) {
+                            fontName = name;
+                            Cross::GetPlatformResDir(resfont);
+                            resfont += fontName;
+                            fontName = resfont;
+                            if (stat(fontName.c_str(),&wstat) && exepath.size()) fontName = exepath + CROSS_FILESPLIT + name;
+                        }
+                    }
                 }
             }
         }
@@ -375,7 +395,7 @@ void CPrinter::updateFont()
 #if defined(WIN32)
         const char* windir = "C:\\WINDOWS";
         if(stat(windir,&wstat) || !(wstat.st_mode & S_IFDIR)) {
-            TCHAR dir[MAX_PATH];
+            TCHAR dir[MAX_PATH] = {};
             if (GetWindowsDirectory(dir, MAX_PATH))
                 windir=dir;
         }
@@ -1290,7 +1310,8 @@ bool CPrinter::processCommandChar(uint8_t ch)
 		    }
 		    curX = leftMargin;
 		    curY += lineSpacing;
-		    if (curY > bottomMargin)
+		    //LOG_MSG("curY:%f, bottomMargin:%f",curY, bottomMargin);
+		    if (curY > bottomMargin-0.0001) // goto the next page if curY is larger or slightly smaller than bottomMargin
 			    newPage(true, false);
 		    return true;
 	    case 0x0e:		//Select double-width printing (one line) (SO)
@@ -2206,7 +2227,7 @@ void CPrinter::outputPage()
 			}
 			else
 			{
-				// Find end of heterogenous area
+				// Find end of heterogeneous area
 				uint8_t diffCount = 1;
 				while (
                     diffCount < 128 && diffCount + pix < numpix && 
@@ -2304,7 +2325,7 @@ void CPrinter::fprintASCII85(FILE* f, uint16_t b)
 	}
 	else // Close string
 	{
-		// Partial tupel if there are still bytes in the buffer
+		// Partial tuple if there are still bytes in the buffer
 		if (ASCII85BufferPos > 0)
 		{
 			for (uint8_t i = ASCII85BufferPos; i < 4; i++)

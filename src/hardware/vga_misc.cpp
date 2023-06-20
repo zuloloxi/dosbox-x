@@ -24,6 +24,9 @@
 #include "control.h"
 #include <math.h>
 
+/* do not issue CPU-side I/O here -- this code emulates functions that the GDC itself carries out, not on the CPU */
+#include "cpu_io_is_forbidden.h"
+
 void vsync_poll_debug_notify();
 
 void vga_write_p3d4(Bitu port,Bitu val,Bitu iolen);
@@ -32,6 +35,9 @@ void vga_write_p3d5(Bitu port,Bitu val,Bitu iolen);
 Bitu vga_read_p3d5(Bitu port,Bitu iolen);
 extern void DISP2_RegisterPorts(void);
 extern bool DISP2_Active(void);
+
+extern bool vga_render_on_demand;
+void VGA_RenderOnDemandUpTo(void);
 
 /* allow the user to specify that undefined bits in 3DA/3BA be set to some nonzero value.
  * this is needed for "JOOP #2" by Europe demo, which has some weird retrace tracking code
@@ -45,10 +51,15 @@ extern bool DISP2_Active(void);
 unsigned char vga_p3da_undefined_bits = 0;
 
 Bitu vga_read_p3da(Bitu port,Bitu iolen) {
-    (void)port;//UNUSED
-    (void)iolen;//UNUSED
+	(void)port;//UNUSED
+	(void)iolen;//UNUSED
 	uint8_t retval = vga_p3da_undefined_bits;
 	double timeInFrame = PIC_FullIndex()-vga.draw.delay.framestart;
+
+	// If the game or demo is wasting time in a loop polling this register (not merely reading to
+	// clear the port 3C0h flip/flop) then now is as good a time as any to render the VGA raster
+	// up to the current point.
+	if (vga_render_on_demand && !vga.attr.disabled/*screen not disabled*/ && !vga.internal.attrindex/*attribute controller flipflop clear*/) VGA_RenderOnDemandUpTo();
 
 	vga.internal.attrindex=false;
 	vga.tandy.pcjr_flipflop=false;
@@ -62,15 +73,15 @@ Bitu vga_read_p3da(Bitu port,Bitu iolen) {
 	} else {
 		double timeInLine=fmod(timeInFrame,vga.draw.delay.htotal);
 		if (timeInLine >= vga.draw.delay.hblkstart && 
-			timeInLine <= vga.draw.delay.hblkend) {
+				timeInLine <= vga.draw.delay.hblkend) {
 			retval |= 1; // horizontal blanking
 		}
 	}
 
-    if (timeInFrame >= vga.draw.delay.vrstart &&
-        timeInFrame <= vga.draw.delay.vrend) {
-        retval |= 8; // vertical retrace
-    }
+	if (timeInFrame >= vga.draw.delay.vrstart &&
+			timeInFrame <= vga.draw.delay.vrend) {
+		retval |= 8; // vertical retrace
+	}
 
 	vsync_poll_debug_notify();
 	return retval;
@@ -232,13 +243,21 @@ void pc98_clear_text(void) {
 
 void pc98_clear_graphics(void) {
 	for (unsigned int i = 0; i < 0x8000; i += 2) {
-		*((uint16_t*)(vga.mem.linear + i + 0x08000)) = 0;
-		*((uint16_t*)(vga.mem.linear + i + 0x10000)) = 0;
-		*((uint16_t*)(vga.mem.linear + i + 0x18000)) = 0;
-		*((uint16_t*)(vga.mem.linear + i + 0x20000)) = 0;
-		*((uint16_t*)(vga.mem.linear + i + 0x28000)) = 0;
-		*((uint16_t*)(vga.mem.linear + i + 0x30000)) = 0;
-		*((uint16_t*)(vga.mem.linear + i + 0x38000)) = 0;
-		*((uint16_t*)(vga.mem.linear + i + 0x40000)) = 0;
+		*((uint16_t*)(vga.mem.linear + i + PC98_VRAM_GRAPHICS_OFFSET + 0x00000)) = 0;
+		*((uint16_t*)(vga.mem.linear + i + PC98_VRAM_GRAPHICS_OFFSET + 0x08000)) = 0;
+		*((uint16_t*)(vga.mem.linear + i + PC98_VRAM_GRAPHICS_OFFSET + 0x10000)) = 0;
+		*((uint16_t*)(vga.mem.linear + i + PC98_VRAM_GRAPHICS_OFFSET + 0x18000)) = 0;
+		*((uint16_t*)(vga.mem.linear + i + PC98_VRAM_GRAPHICS_OFFSET + 0x20000)) = 0;
+		*((uint16_t*)(vga.mem.linear + i + PC98_VRAM_GRAPHICS_OFFSET + 0x28000)) = 0;
+		*((uint16_t*)(vga.mem.linear + i + PC98_VRAM_GRAPHICS_OFFSET + 0x30000)) = 0;
+		*((uint16_t*)(vga.mem.linear + i + PC98_VRAM_GRAPHICS_OFFSET + 0x38000)) = 0;
+		*((uint16_t*)(vga.mem.linear + i + PC98_VRAM_GRAPHICS_OFFSET + 0x40000)) = 0;
+		*((uint16_t*)(vga.mem.linear + i + PC98_VRAM_GRAPHICS_OFFSET + 0x48000)) = 0;
+		*((uint16_t*)(vga.mem.linear + i + PC98_VRAM_GRAPHICS_OFFSET + 0x50000)) = 0;
+		*((uint16_t*)(vga.mem.linear + i + PC98_VRAM_GRAPHICS_OFFSET + 0x58000)) = 0;
+		*((uint16_t*)(vga.mem.linear + i + PC98_VRAM_GRAPHICS_OFFSET + 0x60000)) = 0;
+		*((uint16_t*)(vga.mem.linear + i + PC98_VRAM_GRAPHICS_OFFSET + 0x68000)) = 0;
+		*((uint16_t*)(vga.mem.linear + i + PC98_VRAM_GRAPHICS_OFFSET + 0x70000)) = 0;
+		*((uint16_t*)(vga.mem.linear + i + PC98_VRAM_GRAPHICS_OFFSET + 0x78000)) = 0;
 	}
 }

@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 rm -Rfv linux-host || exit 1
 mkdir -p linux-host || exit 1
 
@@ -36,6 +36,8 @@ cat >>include/SDL_config.h <<_EOF
 #define SDL_WIN32_HX_DOS
 #endif
 _EOF
+
+echo "#undef ENABLE_IM_EVENT" >>include/SDL_platform.h
 fi
 
 # SDL is having concurrency problems with Brew compiles, help it out
@@ -45,10 +47,11 @@ mkdir -p linux-build || exit 1
 mkdir -p linux-build/build || exit 1
 mkdir -p linux-build/include || exit 1
 
-make -j || exit 1
+make -j3 || exit 1
 make install || exit 1  # will install into ./linux-host
 
 # STOP DELETING THE FILE!!!!! I need it for Windows builds!
 cd "$srcdir" || exit 1
 cp -v include/SDL_config.h.default include/SDL_config.h
+cp -v include/SDL_platform.h.default include/SDL_platform.h
 

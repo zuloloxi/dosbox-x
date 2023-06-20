@@ -17,6 +17,7 @@
  */
 
 #include <algorithm>
+#include <array>
 
 #include "dosbox.h"
 #include "logging.h"
@@ -199,6 +200,10 @@ bool DOS_AllocateMemory(uint16_t * segment,uint16_t * blocks) {
 	DOS_MCB psp_mcb(dos.psp()-1);
 	char psp_name[9];
 	psp_mcb.GetFileName(psp_name);
+	if (umb_start==UMB_START_SEG && (dos.loaded_codepage == 936 || dos.loaded_codepage == 950 || dos.loaded_codepage == 951)) {
+		static constexpr std::array<const char*, 4> blacklisted {"KNL", "LIMD", "PY", "RDFNT"};
+		for (auto prog : blacklisted) if (!strcmp(psp_name, prog)) return false;
+	}
 	uint16_t found_seg=0,found_seg_size=0;
 	for (;;) {
 		mcb.SetPt(mcb_segment);
@@ -491,6 +496,12 @@ bool DOS_LinkUMBsToMemChain(uint16_t linkstate) {
 	if (umb_start!=UMB_START_SEG) {
 		if (umb_start!=0xffff) LOG(LOG_DOSMISC,LOG_ERROR)("Corrupt UMB chain: %x",umb_start);
 		return false;
+	} else if (dos.loaded_codepage == 936 || dos.loaded_codepage == 950 || dos.loaded_codepage == 951) {
+		static constexpr std::array<const char*, 6> blacklisted {"KNL", "LIMD", "PY", "RDFNT", "HAN16E", "HAN16V"};
+		char psp_name[9];
+		DOS_MCB psp_mcb(dos.psp()-1);
+		psp_mcb.GetFileName(psp_name);
+		for (auto prog : blacklisted) if (!strcmp(psp_name, prog)) return false;
 	}
 
 	if ((linkstate&1)==(dos_infoblock.GetUMBChainState()&1)) return true;
@@ -539,6 +550,7 @@ bool DOS_LinkUMBsToMemChain(uint16_t linkstate) {
 extern uint16_t DOS_IHSEG;
 
 extern bool enable_dummy_device_mcb;
+extern bool dos_clear_tf_on_int01;
 
 void DOS_SetupMemory(void) {
 	unsigned int max_conv;
@@ -560,11 +572,33 @@ void DOS_SetupMemory(void) {
 	ihofs = 0xF4;
 
 	real_writeb(ihseg,ihofs,(uint8_t)0xCF);		//An IRET Instruction
-	RealSetVec(0x01,RealMake(ihseg,ihofs));		//BioMenace (offset!=4)
 	if (machine != MCH_PCJR) RealSetVec(0x02,RealMake(ihseg,ihofs)); //BioMenace (segment<0x8000). Else, taken by BIOS NMI interrupt
 	RealSetVec(0x03,RealMake(ihseg,ihofs));		//Alien Incident (offset!=0)
 	RealSetVec(0x04,RealMake(ihseg,ihofs));		//Shadow President (lower byte of segment!=0)
 	RealSetVec(0x0f,RealMake(ihseg,ihofs));		//Always a tricky one (soundblaster irq)
+
+	// If INT 01h is executed, take the additional steps to clear the TF flag before return.
+	// Needed for 1996 demo "Dyslexia" by Threesome, which, for some reason when Sound Blaster
+	// is involved, likes to set the TF (trap flag) during the routine to switch back into
+	// protected mode. It will crash right after the LIDT instruction because of the change
+	// in interrupt table location.
+	//
+	// Demo ref: [http://files.scene.org/get:nl-http/mirrors/hornet/demos/1996/d/dyslexia.zip]
+	//
+	// FIXME: What do real Intel processors do in real mode if a nonzero base address is given in
+	//        LIDT? Does it change the memory address of the real mode interrupt vector table?
+	if (dos_clear_tf_on_int01) {
+		real_writeb(ihseg,ihofs-9,0x55);		// 55             PUSH BP
+		real_writew(ihseg,ihofs-8,0xE589);		// 89 E5          MOV BP,SP
+		real_writew(ihseg,ihofs-6,0x6681);		// 81 66 06 FEFF  AND WORD PTR [BP+6],FEFF   clear the TF bit
+		real_writeb(ihseg,ihofs-4,0x06);		// ..
+		real_writew(ihseg,ihofs-3,0xFEFF);		// ..
+		real_writeb(ihseg,ihofs-1,0x5D);		// 5D             POP BP
+		RealSetVec(0x01,RealMake(ihseg,ihofs-9));	//BioMenace (offset!=4)
+	}
+	else {
+		RealSetVec(0x01,RealMake(ihseg,ihofs));		//BioMenace (offset!=4)
+	}
 
 	uint16_t mcb_sizes=0;
 

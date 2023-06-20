@@ -35,6 +35,8 @@
 #include "callback.h"
 #include "../ints/int10.h"
 
+#include <output/output_ttf.h>
+
 using namespace std;
 
 std::map<int, int> lowboxdrawmap {
@@ -83,6 +85,7 @@ bool initttf = false;
 bool copied = false;
 bool firstset = true;
 bool forceswk = false;
+bool notrysgf = false;
 bool wpExtChar = false;
 int wpType = 0;
 int wpVersion = 0;
@@ -91,11 +94,13 @@ int wpFG = 7;
 int lastset = 0;
 int lastfontsize = 0;
 int switchoutput = -1;
+int checkcol = 0;
 
 static unsigned long ttfSize = sizeof(DOSBoxTTFbi), ttfSizeb = 0, ttfSizei = 0, ttfSizebi = 0;
 static void * ttfFont = DOSBoxTTFbi, * ttfFontb = NULL, * ttfFonti = NULL, * ttfFontbi = NULL;
-extern int posx, posy, eurAscii, NonUserResizeCounter;
+extern int posx, posy, eurAscii, transparency, NonUserResizeCounter;
 extern bool rtl, gbk, chinasea, switchttf, force_conversion, blinking, showdbcs, loadlang, window_was_maximized;
+extern const char* RunningProgram;
 extern uint8_t ccount;
 extern uint16_t cpMap[512], cpMap_PC98[256];
 uint16_t cpMap_copy[256];
@@ -107,12 +112,6 @@ static SDL_Rect ttf_textClip = {0, 0, 0, 0};
 ttf_cell curAttrChar[txtMaxLins*txtMaxCols];					// currently displayed textpage
 ttf_cell newAttrChar[txtMaxLins*txtMaxCols];					// to be replaced by
 
-typedef struct {
-	uint8_t red;
-	uint8_t green;
-	uint8_t blue;
-	uint8_t alpha;		// unused
-} alt_rgb;
 alt_rgb altBGR0[16], altBGR1[16];
 int blinkCursor = -1;
 static int prev_sline = -1;
@@ -122,7 +121,7 @@ static bool blinkstate = false;
 bool colorChanged = false, justChanged = false, staycolors = false, firstsize = true, ttfswitch=false, switch_output_from_ttf=false;
 
 int menuwidth_atleast(int width), FileDirExistCP(const char *name), FileDirExistUTF8(std::string &localname, const char *name);
-void AdjustIMEFontSize(void), initcodepagefont(void), change_output(int output), MSG_Init(void), KEYBOARD_Clear(void), RENDER_Reset(void), DOSBox_SetSysMenu(void), GetMaxWidthHeight(unsigned int *pmaxWidth, unsigned int *pmaxHeight), resetFontSize(void), RENDER_CallBack( GFX_CallBackFunctions_t function );
+void AdjustIMEFontSize(void),refreshExtChar(void), initcodepagefont(void), change_output(int output), drawmenu(Bitu val), KEYBOARD_Clear(void), RENDER_Reset(void), DOSBox_SetSysMenu(void), GetMaxWidthHeight(unsigned int *pmaxWidth, unsigned int *pmaxHeight), SetWindowTransparency(int trans), resetFontSize(void), RENDER_CallBack( GFX_CallBackFunctions_t function );
 bool isDBCSCP(void), InitCodePage(void), CodePageGuestToHostUTF16(uint16_t *d/*CROSS_LEN*/,const char *s/*CROSS_LEN*/), systemmessagebox(char const * aTitle, char const * aMessage, char const * aDialogType, char const * aIconType, int aDefaultButton);
 std::string GetDOSBoxXPath(bool withexe=false);
 
@@ -243,9 +242,9 @@ void setVGADAC() {
             IO_WriteB(VGAREG_ACTL_ADDRESS, i+32);
             imap[i]=IO_ReadB(VGAREG_ACTL_READ_DATA);
             IO_WriteB(VGAREG_DAC_WRITE_ADDRESS, imap[i]);
-            IO_WriteB(VGAREG_DAC_DATA, altBGR1[i].red*63/255);
-            IO_WriteB(VGAREG_DAC_DATA, altBGR1[i].green*63/255);
-            IO_WriteB(VGAREG_DAC_DATA, altBGR1[i].blue*63/255);
+            IO_WriteB(VGAREG_DAC_DATA, (altBGR1[i].red+3)*63/255);
+            IO_WriteB(VGAREG_DAC_DATA, (altBGR1[i].green+3)*63/255);
+            IO_WriteB(VGAREG_DAC_DATA, (altBGR1[i].blue+3)*63/255);
         }
     }
 }
@@ -345,6 +344,22 @@ bool readTTF(const char *fName, bool bold, bool ital) {
             ttf_fh = fopen(ttfPath, "rb");
             if (!ttf_fh) {
                 strcpy(ttfPath, config_path.c_str());
+                strcat(ttfPath, fName);
+                ttf_fh = fopen(ttfPath, "rb");
+            }
+        }
+    }
+    if (!ttf_fh) {
+        std::string res_path;
+        Cross::GetPlatformResDir(res_path);
+        struct stat info;
+        if (!stat(res_path.c_str(), &info) && (info.st_mode & S_IFDIR)) {
+            strcpy(ttfPath, res_path.c_str());
+            strcat(ttfPath, fName);
+            strcat(ttfPath, ".ttf");
+            ttf_fh = fopen(ttfPath, "rb");
+            if (!ttf_fh) {
+                strcpy(ttfPath, res_path.c_str());
                 strcat(ttfPath, fName);
                 ttf_fh = fopen(ttfPath, "rb");
             }
@@ -476,6 +491,43 @@ void CheckTTFLimit() {
     }
 }
 
+int setTTFMap(bool changecp) {
+    char text[2];
+    uint16_t uname[4], wcTest[256];
+    int cp = dos.loaded_codepage;
+    for (int i = 0; i < 256; i++) {
+        text[0]=i;
+        text[1]=0;
+        uname[0]=0;
+        uname[1]=0;
+        if (cp == 932 && (halfwidthkana || IS_JEGA_ARCH)) forceswk=true;
+        if (cp == 932 || cp == 936 || cp == 949 || cp == 950 || cp == 951) dos.loaded_codepage = 437;
+        if (CodePageGuestToHostUTF16(uname,text)) {
+            wcTest[i] = uname[1]==0?uname[0]:i;
+            if (cp == 932 && lowboxdrawmap.find(i)!=lowboxdrawmap.end() && TTF_GlyphIsProvided(ttf.SDL_font, wcTest[i]))
+                cpMap[i] = wcTest[i];
+        }
+        forceswk=false;
+        if (cp == 932 || cp == 936 || cp == 949 || cp == 950 || cp == 951) dos.loaded_codepage = cp;
+    }
+    uint16_t unimap;
+    int notMapped = 0;
+    for (int y = ((cpMap[1]!=1&&cpMap[1]!=0x263A)||cp==867||(customcp&&(dos.loaded_codepage==customcp||changecp))||(altcp&&(dos.loaded_codepage==altcp||changecp))?0:8); y < 16; y++)
+        for (int x = 0; x < 16; x++) {
+            if (y<8 && (wcTest[y*16+x] == y*16+x || wcTest[y*16+x] == cp437_to_unicode[y*16+x])) unimap = cpMap_copy[y*16+x];
+            else unimap = wcTest[y*16+x];
+            if (!TTF_GlyphIsProvided(ttf.SDL_font, unimap)) {
+                cpMap[y*16+x] = 0;
+                notMapped++;
+                LOG_MSG("Unmapped character: %3d - %4x", y*16+x, unimap);
+            } else
+                cpMap[y*16+x] = unimap;
+        }
+    if (eurAscii != -1 && TTF_GlyphIsProvided(ttf.SDL_font, 0x20ac))
+        cpMap[eurAscii] = 0x20ac;
+    return notMapped;
+}
+
 int setTTFCodePage() {
     if (!copied) {
         memcpy(cpMap_copy,cpMap,sizeof(cpMap[0])*256);
@@ -491,47 +543,15 @@ int setTTFCodePage() {
 
     if (cp) {
         LOG_MSG("Loaded system codepage: %d\n", cp);
-        char text[2];
-        uint16_t uname[4], wcTest[256];
-        for (int i = 0; i < 256; i++) {
-            text[0]=i;
-            text[1]=0;
-            uname[0]=0;
-            uname[1]=0;
-            if (cp == 932 && (halfwidthkana || IS_JEGA_ARCH)) forceswk=true;
-            if (cp == 932 || cp == 936 || cp == 949 || cp == 950 || cp == 951) dos.loaded_codepage = 437;
-            if (CodePageGuestToHostUTF16(uname,text)) {
-                wcTest[i] = uname[1]==0?uname[0]:i;
-                if (cp == 932 && lowboxdrawmap.find(i)!=lowboxdrawmap.end() && TTF_GlyphIsProvided(ttf.SDL_font, wcTest[i]))
-                    cpMap[i] = wcTest[i];
-            }
-            forceswk=false;
-            if (cp == 932 || cp == 936 || cp == 949 || cp == 950 || cp == 951) dos.loaded_codepage = cp;
-        }
-        uint16_t unimap;
-        int notMapped = 0;
-        for (int y = ((customcp&&dos.loaded_codepage==customcp)||(altcp&&dos.loaded_codepage==altcp)?0:8); y < 16; y++)
-            for (int x = 0; x < 16; x++) {
-                if (y<8 && (wcTest[y*16+x] == y*16+x || wcTest[y*16+x] == cp437_to_unicode[y*16+x])) unimap = cpMap_copy[y*16+x];
-                else unimap = wcTest[y*16+x];
-                if (!TTF_GlyphIsProvided(ttf.SDL_font, unimap)) {
-                    cpMap[y*16+x] = 0;
-                    notMapped++;
-                    LOG_MSG("Unmapped character: %3d - %4x", y*16+x, unimap);
-                } else
-                    cpMap[y*16+x] = unimap;
-            }
-        if (eurAscii != -1 && TTF_GlyphIsProvided(ttf.SDL_font, 0x20ac))
-            cpMap[eurAscii] = 0x20ac;
-        initcodepagefont();
+        int notMapped = setTTFMap(true);
+        if (strcmp(RunningProgram, "LOADLIN") && !dos_kernel_disabled)
+            initcodepagefont();
 #if defined(WIN32) && !defined(HX_DOS)
         DOSBox_SetSysMenu();
 #endif
         if(IS_JEGA_ARCH) memcpy(cpMap,cpMap_AX,sizeof(cpMap[0])*32);
         if (cp == 932 && halfwidthkana) resetFontSize();
-        if (cp == 936) mainMenu.get_item("ttf_extcharset").check(gbk).refresh_item(mainMenu);
-        else if (cp == 950 || cp == 951) mainMenu.get_item("ttf_extcharset").check(chinasea).refresh_item(mainMenu);
-        else mainMenu.get_item("ttf_extcharset").check(gbk&&chinasea).refresh_item(mainMenu);
+        refreshExtChar();
         return notMapped;
     } else
         return -1;
@@ -623,7 +643,7 @@ void OUTPUT_TTF_Select(int fsize) {
         bool trysgf = false;
         if (!*fName) {
             std::string mtype(static_cast<Section_prop *>(control->GetSection("dosbox"))->Get_string("machine"));
-            if (IS_PC98_ARCH||mtype.substr(0, 4)=="pc98"||(InitCodePage()&&isDBCSCP())) trysgf = true;
+            if (IS_PC98_ARCH||mtype.substr(0, 4)=="pc98"||(!notrysgf&&InitCodePage()&&isDBCSCP())) trysgf = true;
         }
         force_conversion = false;
         dos.loaded_codepage = cp;
@@ -695,10 +715,14 @@ void OUTPUT_TTF_Select(int fsize) {
         winPerc = ttf_section->Get_int("winperc");
         if (winPerc>100||(fsize==2&&GFX_IsFullscreen())||(fsize!=1&&fsize!=2&&(control->opt_fullscreen||static_cast<Section_prop *>(control->GetSection("sdl"))->Get_bool("fullscreen")))) winPerc=100;
         else if (winPerc<25) winPerc=25;
+#if defined(HX_DOS)
+        winPerc=100;
+#else
         if ((fsize==1||switchttf)&&winPerc==100) {
             winPerc=60;
             if (switchttf&&GFX_IsFullscreen()) GFX_SwitchFullScreen();
         }
+#endif
         fontSize = ttf_section->Get_int("ptsize");
         char512 = ttf_section->Get_bool("char512");
         showbold = ttf_section->Get_bool("bold");
@@ -726,8 +750,8 @@ void OUTPUT_TTF_Select(int fsize) {
                 c=80;
                 r=real_readb(0x60,0x113) & 0x01 ? 25 : 20;
             } else {
-                c=real_readw(BIOSMEM_SEG,BIOSMEM_NB_COLS);
-                r=(uint16_t)(IS_EGAVGA_ARCH?real_readb(BIOSMEM_SEG,BIOSMEM_NB_ROWS):24)+1;
+                c=strcmp(RunningProgram, "LOADLIN")?real_readw(BIOSMEM_SEG,BIOSMEM_NB_COLS):80;
+                r=(uint16_t)(IS_EGAVGA_ARCH&&strcmp(RunningProgram, "LOADLIN")?real_readb(BIOSMEM_SEG,BIOSMEM_NB_ROWS):24)+1;
             }
             if (ttf.lins<1||ttf.cols<1)	{
                 if (ttf.cols<1)
@@ -763,8 +787,8 @@ void OUTPUT_TTF_Select(int fsize) {
                 c=80;
                 r=real_readb(0x60,0x113) & 0x01 ? 25 : 20;
             } else {
-                c=real_readw(BIOSMEM_SEG,BIOSMEM_NB_COLS);
-                r=(uint16_t)(IS_EGAVGA_ARCH?real_readb(BIOSMEM_SEG,BIOSMEM_NB_ROWS):24)+1;
+                c=strcmp(RunningProgram, "LOADLIN")?real_readw(BIOSMEM_SEG,BIOSMEM_NB_COLS):80;
+                r=(uint16_t)(IS_EGAVGA_ARCH&&strcmp(RunningProgram, "LOADLIN")?real_readb(BIOSMEM_SEG,BIOSMEM_NB_ROWS):24)+1;
             }
             ttf.cols=c;
             ttf.lins=r;
@@ -841,7 +865,7 @@ resize1:
 	}
 #endif
 resize2:
-    if (fontSize>=MIN_PTSIZE && 100*ttf.cols*ttf.width/maxWidth*ttf.lins*ttf.height/maxHeight > 100 || (lesssize && (ttf.cols*ttf.width>maxWidth || ttf.lins*ttf.height>maxHeight))) {
+    if ((fontSize>=MIN_PTSIZE && 100*ttf.cols*ttf.width/maxWidth*ttf.lins*ttf.height/maxHeight > 100) || (lesssize && (ttf.cols*ttf.width>maxWidth || ttf.lins*ttf.height>maxHeight))) {
         if (lesssize && curSize > MIN_PTSIZE) {
             curSize--;
             GFX_SelectFontByPoints(curSize);
@@ -973,7 +997,7 @@ void processWP(uint8_t *pcolorBG, uint8_t *pcolorFG) {
 
 bool hasfocus = true, lastfocus = true;
 void GFX_EndTextLines(bool force) {
-    if (!force&&!IS_PC98_ARCH&&((!CurMode||CurMode->type!=M_TEXT))) return;
+    if (!force&&!IS_PC98_ARCH&&(!CurMode||CurMode->type!=M_TEXT)) return;
 #if DOSBOXMENU_TYPE == DOSBOXMENU_SDLDRAW
     if (!ttf.fullScrn) {
         mainMenu.setRedraw();
@@ -981,7 +1005,7 @@ void GFX_EndTextLines(bool force) {
     }
 #endif
     static uint8_t bcount = 0;
-	Uint16 unimap[txtMaxCols+1];							// max+1 charaters in a line
+	Uint16 unimap[txtMaxCols+1];							// max+1 characters in a line
 	int xmin = ttf.cols;									// keep track of changed area
 	int ymin = ttf.lins;
 	int xmax = -1;
@@ -1085,7 +1109,7 @@ void GFX_EndTextLines(bool force) {
                     if(ttf_dosv && ascii == 0x5c)
                         ascii = 0x9d;
                     curAC[x] = newAC[x];
-                    if (ascii > 175 && ascii < 179 && !IS_PC98_ARCH && !IS_JEGA_ARCH && dos.loaded_codepage != 864 && dos.loaded_codepage != 874 && dos.loaded_codepage != 3021 && !(dos.loaded_codepage == 932 && halfwidthkana) && (dos.loaded_codepage < 1250 || dos.loaded_codepage > 1258) && !(altcp && dos.loaded_codepage == altcp) && !(customcp && dos.loaded_codepage == customcp)) {	// special: shade characters 176-178 unless PC-98
+                    if (ascii > 175 && ascii < 179 && !IS_PC98_ARCH && !IS_JEGA_ARCH && dos.loaded_codepage != 864 && dos.loaded_codepage != 868 && dos.loaded_codepage != 874 && dos.loaded_codepage != 3021 && !(dos.loaded_codepage == 932 && halfwidthkana) && (dos.loaded_codepage < 1250 || dos.loaded_codepage > 1258) && !(altcp && dos.loaded_codepage == altcp) && !(customcp && dos.loaded_codepage == customcp)) {	// special: shade characters 176-178 unless PC-98
                         ttf_bgColor.b = (ttf_bgColor.b*(179-ascii) + ttf_fgColor.b*(ascii-175))>>2;
                         ttf_bgColor.g = (ttf_bgColor.g*(179-ascii) + ttf_fgColor.g*(ascii-175))>>2;
                         ttf_bgColor.r = (ttf_bgColor.r*(179-ascii) + ttf_fgColor.r*(ascii-175))>>2;
@@ -1178,7 +1202,7 @@ void GFX_EndTextLines(bool force) {
 				ttf_textRect.y = ttf.offY+y*ttf.height;
 				SDL_BlitSurface(textSurface, &ttf_textClip, sdl.surface, &ttf_textRect);
 				SDL_FreeSurface(textSurface);
-				if ((vga.draw.cursor.blinkon || blinkCursor<0)) {
+				if (vga.draw.cursor.blinkon || blinkCursor<0) {
                     // second reverse lower lines
                     textSurface = TTF_RenderUNICODE_Shaded(ttf.SDL_font, unimap, ttf_bgColor, ttf_fgColor, ttf.width*(dw?2:1));
                     ttf_textClip.y = (ttf.height*(vga.draw.cursor.sline>15?15:vga.draw.cursor.sline))>>4;
@@ -1225,6 +1249,9 @@ void resetFontSize() {
 #endif
 		}
 		GFX_EndTextLines(true);
+#if defined(HX_DOS)
+		PIC_AddEvent(drawmenu, 200);
+#endif
 	}
 }
 
@@ -1333,6 +1360,10 @@ void ttf_reset() {
 #endif
 }
 
+void ttfreset(Bitu val) {
+    ttf_reset();
+}
+
 void ttf_setlines(int cols, int lins) {
     if (cols>0) SetVal("ttf", "cols", std::to_string(cols));
     if (lins>0) SetVal("ttf", "lins", std::to_string(lins));
@@ -1345,11 +1376,14 @@ void ttf_setlines(int cols, int lins) {
 
 void ttf_switch_on(bool ss=true) {
     if ((ss&&ttfswitch)||(!ss&&switch_output_from_ttf)) {
-        uint16_t oldax=reg_ax;
-        reg_ax=0x1600;
-        CALLBACK_RunRealInt(0x2F);
-        if (reg_al!=0&&reg_al!=0x80) {reg_ax=oldax;return;}
-        reg_ax=oldax;
+        checkcol = 0;
+        if (strcmp(RunningProgram, "LOADLIN")) {
+            uint16_t oldax=reg_ax;
+            reg_ax=0x1600;
+            CALLBACK_RunRealInt(0x2F);
+            if (reg_al!=0&&reg_al!=0x80) {reg_ax=oldax;return;}
+            reg_ax=oldax;
+        }
         if (window_was_maximized&&!GFX_IsFullscreen()) {
 #if defined(WIN32)
             ShowWindow(GetHWND(), SW_RESTORE);
@@ -1373,7 +1407,6 @@ void ttf_switch_on(bool ss=true) {
             OUTPUT_TTF_Select(3);
 #if DOSBOXMENU_TYPE == DOSBOXMENU_HMENU
             if (gl && GFX_IsFullscreen()) { // Hack for full-screen switch from OpenGL outputs
-                void GFX_SwitchFullScreen(void);
                 GFX_SwitchFullScreen();
                 GFX_SwitchFullScreen();
             }
@@ -1381,10 +1414,16 @@ void ttf_switch_on(bool ss=true) {
             resetreq = true;
         }
         resetFontSize();
+#ifdef C_SDL2
+        transparency = 0;
+        SetWindowTransparency(static_cast<Section_prop *>(control->GetSection("sdl"))->Get_int("transparency"));
+#endif
+        if (!IS_PC98_ARCH && vga.draw.address_add != ttf.cols * 2) checkcol = ss?2:1;
     }
 }
 
 void ttf_switch_off(bool ss=true) {
+    checkcol = 0;
     if (!ss&&ttfswitch)
         ttf_switch_on();
     if (ttf.inUse) {
@@ -1427,6 +1466,11 @@ void ttf_switch_off(bool ss=true) {
         //if (GFX_IsFullscreen()) GFX_SwitchFullscreenNoReset();
         mainMenu.get_item("output_ttf").enable(false).refresh_item(mainMenu);
         RENDER_Reset();
+#ifdef C_SDL2
+        transparency = 0;
+        SetWindowTransparency(static_cast<Section_prop *>(control->GetSection("sdl"))->Get_int("transparency"));
+#endif
+        if (Mouse_IsLocked()) GFX_CaptureMouse(true);
     }
 }
 #endif

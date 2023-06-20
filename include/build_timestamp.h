@@ -1,4 +1,4 @@
 /*auto-generated*/
-#define UPDATED_STR "May 1, 2022 5:40:57pm"
-#define GIT_COMMIT_HASH "65d8ff4"
-#define COPYRIGHT_END_YEAR "2022"
+#define UPDATED_STR "May 1, 2023 7:32:10am"
+#define GIT_COMMIT_HASH "d4e2dc8"
+#define COPYRIGHT_END_YEAR "2023"

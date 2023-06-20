@@ -409,7 +409,7 @@ int64_t CDROM_Interface_Image::CHDFile::getLength()
 
 uint16_t CDROM_Interface_Image::CHDFile::getEndian()
 {
-    // CHD: no idea about this, chaning this did not fix the cd audio noise
+    // CHD: no idea about this, changing this did not fix the cd audio noise
     // Image files are read into native-endian byte-order
 #if defined(WORDS_BIGENDIAN)
     return AUDIO_S16MSB;
@@ -556,6 +556,8 @@ bool CDROM_Interface_Image::GetAudioTrackInfo(int track, TMSF& start, unsigned c
 	return true;
 }
 
+extern const char* RunningProgram;
+
 bool CDROM_Interface_Image::GetAudioSub(unsigned char& attr, unsigned char& track, unsigned char& index, TMSF& relPos, TMSF& absPos)
 {
 	int cur_track = GetTrack(player.currFrame);
@@ -565,11 +567,19 @@ bool CDROM_Interface_Image::GetAudioSub(unsigned char& attr, unsigned char& trac
 	index = 1;
 	FRAMES_TO_MSF(player.currFrame + 150, &absPos.min, &absPos.sec, &absPos.fr);
 	FRAMES_TO_MSF(player.currFrame - tracks[track - 1].start + 150, &relPos.min, &relPos.sec, &relPos.fr);
+	if(IS_PC98_ARCH && player.playbackRemaining == 0 && !strcmp(RunningProgram, "ITP")) {
+		// POLICENAUTS
+		// It freeze at the end of the Konami logo or opening.
+		// It seems that the end of CD-DA output is checked by the time and frame of the current track,
+		// but the time and frame values of the current track do not seem to be correct.
+		// For now, this is handled by returning an error when the CD-DA output is finished.
+		return false;
+	}
 
 	#ifdef DEBUG
 	LOG_MSG("%s CDROM: GetAudioSub attr=%u, track=%u, index=%u", get_time(), attr, track, index);
 
-	LOG_MSG("%s CDROM: GetAudioSub absoute  offset (%d), MSF=%d:%d:%d",
+	LOG_MSG("%s CDROM: GetAudioSub absolute offset (%d), MSF=%d:%d:%d",
       get_time(),
 	  player.currFrame + 150,
 	  absPos.min,
@@ -632,7 +642,7 @@ bool CDROM_Interface_Image::PlayAudioSector(unsigned long start, unsigned long l
 
 	// We can't play audio from a data track (as it would result in garbage/static)
 	else if(track >= 0 && tracks[track].attr == 0x40)
-		LOG_MSG("CDROM: Tried to play the data track. Not doing this track, attr = [%d, %d, %d]", start, track, tracks[track].attr);
+		LOG_MSG("CDROM: Tried to play the data track. Not doing this track, attr = [%d, %d, %d]", (int)start, (int)track, (int)tracks[track].attr);
 
     else if(track > end)
         LOG_MSG("CDROM: Tried to load track #  % d, which does not exist in cue sheet", track);
@@ -763,11 +773,18 @@ bool CDROM_Interface_Image::ReadSectors(PhysPt buffer, bool raw, unsigned long s
 
 bool CDROM_Interface_Image::ReadSectorsHost(void *buffer, bool raw, unsigned long sector, unsigned long num)
 {
-	unsigned int sectorSize = raw ? RAW_SECTOR_SIZE : COOKED_SECTOR_SIZE;
+	Bitu sectorSize = raw ? RAW_SECTOR_SIZE : COOKED_SECTOR_SIZE;
+	uint8_t* buf = (uint8_t*)buffer;
 	bool success = true; //Gobliiins reads 0 sectors
 	for(unsigned long i = 0; i < num; i++) {
-		success = ReadSector((uint8_t*)buffer + (i * (Bitu)sectorSize), raw, sector + i);
+		success = ReadSector(&buf[i * sectorSize], raw, sector + i);
 		if (!success) break;
+		if (raw && buf[i * sectorSize + 2068] && sector < tracks[0].length && !tracks[0].mode2) {
+			// ECMA-130: The Intermediate field shall consist of 8 (00)-bytes recorded in positions 2068 to 2075
+			// We report a non-zero value as a sector read error. This is to satisfy copy protection checks which expect certain sectors to be bad.
+			// Some raw CD image formats represent bad sectors on the original media by filling up the entire sector beyond the header with a dummy byte like 0x55.
+			return false;
+		}
 	}
 
 	return success;
@@ -846,10 +863,10 @@ void CDROM_Interface_Image::CDAudioCallBack(Bitu len)
 			total_requested = 0;
 		}
 
-		// Three scenarios in order of probabilty:
+		// Three scenarios in order of probability:
 		//
 		// 1. Consume: If our decoded circular buffer is sufficiently filled to
-		//	     satify the requested size, then feed the callback with
+		//	     satisfy the requested size, then feed the callback with
 		//	     the requested number of bytes.
 		//
 		// 2. Wrap: If we've decoded and consumed to edge of our buffer, then
@@ -858,7 +875,7 @@ void CDROM_Interface_Image::CDAudioCallBack(Bitu len)
 		//
 		// 3. Fill: When out circular buffer is too depleted to satisfy the
 		//	     requested size, then perform chunked-decode reads from
-		//	     the audio-codec to either fill our buffer or satify our
+		//	     the audio-codec to either fill our buffer or satisfy our
 		//	     remaining playback - whichever is smaller.
 		//
 		while (true) {
@@ -890,8 +907,8 @@ void CDROM_Interface_Image::CDAudioCallBack(Bitu len)
 
 				// Games can query the current Red Book MSF frame-position, so we keep that up-to-date here.
 				// We scale the final number of frames by the percent complete, which
-				// avoids having to keep track of the euivlent number of Red Book frames
-				// read (which would involve coverting the compressed streams data-rate into
+				// avoids having to keep track of the equivalent number of Red Book frames
+				// read (which would involve converting the compressed streams data-rate into
 				// CDROM Red Book rate, which is more work than simply scaling).
 				//
 				const float playbackPercentSoFar = static_cast<float>(player.playbackTotal - player.playbackRemaining) / player.playbackTotal;
@@ -997,7 +1014,7 @@ bool CDROM_Interface_Image::LoadIsoFile(char* filename)
 	return true;
 }
 
-bool CDROM_Interface_Image::CanReadPVD(TrackFile *file, int sectorSize, bool mode2)
+bool CDROM_Interface_Image::CanReadPVD(TrackFile *file, int sectorSize, bool mode2) const
 {
 	uint8_t pvd[COOKED_SECTOR_SIZE];
 	int seek = 16 * sectorSize;	// first vd is located at sector 16
@@ -1005,8 +1022,25 @@ bool CDROM_Interface_Image::CanReadPVD(TrackFile *file, int sectorSize, bool mod
 	if (mode2) seek += 24;
 	file->read(pvd, seek, COOKED_SECTOR_SIZE);
 	// pvd[0] = descriptor type, pvd[1..5] = standard identifier, pvd[6] = iso version (+8 for High Sierra)
-	return ((pvd[0] == 1 && !strncmp((char*)(&pvd[1]), "CD001", 5) && pvd[6] == 1) ||
-			(pvd[8] == 1 && !strncmp((char*)(&pvd[9]), "CDROM", 5) && pvd[14] == 1));
+	if ((pvd[0] == 1 && !strncmp((char*)(&pvd[1]), "CD001", 5) && pvd[6] == 1) ||
+		(pvd[8] == 1 && !strncmp((char*)(&pvd[9]), "CDROM", 5) && pvd[14] == 1))
+			return true; // At least ISO 9660 compliant
+
+	// Hm, maybe the ISO image is pure UDF
+	seek = 256 * sectorSize;	// anchor volume descriptor pointer at sector 256
+	if ((sectorSize == RAW_SECTOR_SIZE || sectorSize == 2448) && !mode2) seek += 16;
+	if (mode2) seek += 24;
+	file->read(pvd, seek, COOKED_SECTOR_SIZE);
+	{
+		UDFTagId aid;
+
+		if (aid.get(COOKED_SECTOR_SIZE,pvd)) {
+			if (aid.TagIdentifier == 2/*Anchor volume descriptor*/ || aid.TagLocation == 256)
+				return true; // The ISO image is pure UDF
+		}
+	}
+
+	return false;
 }
 
 #if defined(WIN32)
@@ -1029,8 +1063,8 @@ bool CDROM_Interface_Image::LoadCueSheet(char *cuefile)
 {
 	Track track = {0, 0, 0, 0, 0, 0, 0, false, NULL};
 	tracks.clear();
-    int curr_track = 0;
-    int shift = 0;
+//	int curr_track = 0; // unused
+	int shift = 0;
 	int currPregap = 0;
 	int totalPregap = 0;
 	int prestart = -1;
@@ -1321,14 +1355,14 @@ bool CDROM_Interface_Image::AddTrack(Track &curr, int &shift, int prestart, int 
 	// frames between index 0(prestart) and 1(curr.start) must be skipped
 	int skip;
 	if (prestart >= 0) {
-		if (prestart > curr.start) return false;
+		if ((unsigned int)prestart > curr.start) return false;
 		skip = curr.start - prestart;
         //LOG_MSG("CDROM Addtrack skip=%d prestart=%d curr.start=%d", skip, prestart, curr.start);
 	} else skip = 0;
 
 	// first track (track number must be 1)
 	if (tracks.empty()) {
-		if (curr.number != 1) return false;
+        if(curr.number != 1) return false;
         curr.pregap = 0; // first track starts from sector zero, right?
         curr.skip = skip * curr.sectorSize; //
 		curr.start += currPregap;
@@ -1382,7 +1416,7 @@ bool CDROM_Interface_Image::AddTrack(Track &curr, int &shift, int prestart, int 
 	return true;
 }
 
-bool CDROM_Interface_Image::HasDataTrack(void)
+bool CDROM_Interface_Image::HasDataTrack(void) const
 {
 	//Data track has attribute 0x40
 	for (const auto &track : tracks) {
@@ -1393,8 +1427,18 @@ bool CDROM_Interface_Image::HasDataTrack(void)
 	return false;
 }
 
+bool CDROM_Interface_Image::HasAudioTrack(void) const
+{
+	//Audio track has attribute 0x00
+	for (const auto &track : tracks) {
+		if (track.attr == 0x00) {
+			return true;
+		}
+	}
+	return false;
+}
 
-bool CDROM_Interface_Image::GetRealFileName(string &filename, string &pathname)
+bool CDROM_Interface_Image::GetRealFileName(string &filename, string &pathname) const
 {
 	// check if file exists
 	struct stat test;
@@ -1429,8 +1473,8 @@ bool CDROM_Interface_Image::GetRealFileName(string &filename, string &pathname)
 #if !defined (WIN32)
 	/**
 	 *  Consider the possibility that the filename has a windows directory
-	 *  seperator (inside the CUE file) which is common for some commercial
-	 *  rereleases of DOS games using DOSBox
+	 *  separator (inside the CUE file) which is common for some commercial
+	 *  re-releases of DOS games using DOSBox
 	 */
 	string copy = filename;
 	size_t l = copy.size();
@@ -1452,7 +1496,7 @@ bool CDROM_Interface_Image::GetRealFileName(string &filename, string &pathname)
 	return false;
 }
 
-bool CDROM_Interface_Image::GetCueKeyword(string &keyword, istream &in)
+bool CDROM_Interface_Image::GetCueKeyword(string &keyword, istream &in) const
 {
 	in >> keyword;
 	for (Bitu i = 0; i < keyword.size(); i++) {
@@ -1461,7 +1505,7 @@ bool CDROM_Interface_Image::GetCueKeyword(string &keyword, istream &in)
 	return true;
 }
 
-bool CDROM_Interface_Image::GetCueFrame(int &frames, istream &in)
+bool CDROM_Interface_Image::GetCueFrame(int &frames, istream &in) const
 {
 	string msf;
 	in >> msf;
@@ -1471,7 +1515,7 @@ bool CDROM_Interface_Image::GetCueFrame(int &frames, istream &in)
 	return success;
 }
 
-bool CDROM_Interface_Image::GetCueString(string &str, istream &in)
+bool CDROM_Interface_Image::GetCueString(string &str, istream &in) const
 {
 	int pos = (int)in.tellg();
 	in >> str;

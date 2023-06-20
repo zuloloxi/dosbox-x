@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 ./sb2u.pl cp437_to_unicode <CP437.TXT >../../include/cp437_uni.h || exit 1
 ./sb2u.pl cp737_to_unicode <CP737.TXT >../../include/cp737_uni.h || exit 1
 ./sb2u.pl cp775_to_unicode <CP775.TXT >../../include/cp775_uni.h || exit 1
@@ -7,8 +7,10 @@
 ./sb2u.pl cp852_to_unicode <CP852.TXT >../../include/cp852_uni.h || exit 1
 ./sb2u.pl cp853_to_unicode <CP853.TXT >../../include/cp853_uni.h || exit 1
 ./sb2u.pl cp855_to_unicode <CP855.TXT >../../include/cp855_uni.h || exit 1
+./sb2u.pl cp856_to_unicode <CP856.TXT >../../include/cp856_uni.h || exit 1
 ./sb2u.pl cp857_to_unicode <CP857.TXT >../../include/cp857_uni.h || exit 1
 ./sb2u.pl cp858_to_unicode <CP858.TXT >../../include/cp858_uni.h || exit 1
+./sb2u.pl cp859_to_unicode <CP859.TXT >../../include/cp859_uni.h || exit 1
 ./sb2u.pl cp860_to_unicode <CP860.TXT >../../include/cp860_uni.h || exit 1
 ./sb2u.pl cp861_to_unicode <CP861.TXT >../../include/cp861_uni.h || exit 1
 ./sb2u.pl cp862_to_unicode <CP862.TXT >../../include/cp862_uni.h || exit 1
@@ -16,6 +18,8 @@
 ./sb2u.pl cp864_to_unicode <CP864.TXT >../../include/cp864_uni.h || exit 1
 ./sb2u.pl cp865_to_unicode <CP865.TXT >../../include/cp865_uni.h || exit 1
 ./sb2u.pl cp866_to_unicode <CP866.TXT >../../include/cp866_uni.h || exit 1
+./sb2u.pl cp867_to_unicode <CP867.TXT >../../include/cp867_uni.h || exit 1
+./sb2u.pl cp868_to_unicode <CP868.TXT >../../include/cp868_uni.h || exit 1
 ./sb2u.pl cp869_to_unicode <CP869.TXT >../../include/cp869_uni.h || exit 1
 ./sb2u.pl cp872_to_unicode <CP872.TXT >../../include/cp872_uni.h || exit 1
 ./sb2u.pl cp874_to_unicode <CP874.TXT >../../include/cp874_uni.h || exit 1

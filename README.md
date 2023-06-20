@@ -3,7 +3,7 @@
 
 **Be sure to also visit DOSBox-X's website at [https://dosbox-x.com](https://dosbox-x.com) (or [http://dosbox-x.software](http://dosbox-x.software))**
 
-**Discord channel for the DOSBox-X project: [https://discord.gg/khVZR5UK](https://discord.gg/khVZR5UK)**
+**Discord channel for the DOSBox-X project: [https://discord.gg/5cnTmcsTpG](https://discord.gg/5cnTmcsTpG)**
 
 ## Table of Contents
 
@@ -24,13 +24,13 @@
 
 DOSBox-X is a cross-platform DOS emulator based on the DOSBox project (www.dosbox.com).
 
-Like DOSBox, it emulates a PC necessary for running many MS-DOS games and applications that simply cannot be run on modern PCs and operating systems. However, while the main focus of DOSBox is for running DOS games, DOSBox-X goes much further than this. Started as a fork of the DOSBox project, it retains compatibility with the wide base of DOS games and DOS gaming DOSBox was designed for. But it is also a platform for running DOS applications, including emulating the environments to run Windows 3.x, 9x and ME and software written for those versions of Windows. DOSBox-X additionally features support for DOS/V and NEC PC-98 emulations so that you can play DOS/V and PC-98 games with it.
+Like DOSBox, it emulates a PC necessary for running many MS-DOS games and applications that simply cannot be run on modern PCs and operating systems. However, while the main focus of DOSBox is for running DOS games, DOSBox-X goes much further than this. Started as a fork of the DOSBox project, it retains compatibility with the wide base of DOS games and DOS gaming DOSBox was designed for. But it is also a platform for running DOS applications, including emulating the environments to run Windows 3.x, 9x and ME and software written for those versions of Windows. By adding official support for Windows 95, 98, ME emulation and acceleration, we hope that those old Windows games and applications could be enjoyed or used once more. Moreover, DOSBox-X adds support for DOS/V and NEC PC-98 emulations so that you can play DOS/V and PC-98 games with it.
 
-Our goal is to eventually make DOSBox-X a complete DOS emulation package, both fully-featured and easy to use, while giving users the options to configure the DOS virtual machine. We implement new features with each official release, and also try our best to deliver a consistent cross-platform experience for users instead of focusing on a particular platform. In order to help improve the general DOS emulation and also to [help with new DOS developments](https://dosbox-x.com/newdosdevelopment.html), it is our desire to maintain and implement accurate emulation, and at the same time we are also making efforts to improve emulation quality, speed, and usability for end users. Furthermore, we hope to improve the out-of-the-box experience for new users who want to run DOS programs or games, while giving them the feeling that they are running native DOS systems.
+Compared with DOSBox, DOSBox-X focuses more on general emulation and accuracy. In order to help running DOS games and applications, Windows 3.x/9x/ME, as well as for the purpose of historical preservation, testing and continued DOS developments, it is our desire to implement accurate emulation, accurate enough to [help make new DOS developments possible](https://dosbox-x.com/newdosdevelopment.html) with confidence the program will run properly on actual DOS systems. DOSBox-X includes various features for different purposes (some of them ported from other projects), which are implemented as incremental changes since it was forked from DOSBox SVN Daum. DOSBox-X provides many ways to tweak and configure the DOS virtual machine, as we believe a better way to emulate the DOS platform is to give users all the options they need to emulate everything from the original IBM PC system all the way up to late 1990's configuration, whatever it takes to get your game or software package to run. Our goal is to eventually make DOSBox-X a complete emulation package that covers all pre-2000 DOS and Windows 9x based system scenarios, including peripherals, motherboards, CPUs, and all manner of hardware that was made for PC hardware of that time.
 
-Please check out the [DOSBox-X homepage](https://dosbox-x.com) for common packages of the latest release for the supported platforms. Also see the [INSTALL](INSTALL.md) page for DOSBox-X installation instructions and other packages, and the [Releases](https://github.com/joncampbell123/dosbox-x/releases) page for archives of all released DOSBox-X versions. For more information about DOSBox-X, such as setting up and running DOSBox-X including its usage tips, please read the user guide in the [DOSBox-X Wiki](https://dosbox-x.com/wiki).
+Please check out the [DOSBox-X homepage](https://dosbox-x.com) for common packages of the latest release for the supported platforms, as well as screenshots of some DOS programs and games running in DOSBox-X. Also see the [INSTALL](INSTALL.md) page for DOSBox-X installation instructions and other packages, and the [Releases](https://github.com/joncampbell123/dosbox-x/releases) page for archives of all released DOSBox-X versions. For more information about DOSBox-X, such as setting up and running DOSBox-X including its usage tips, please read the user guide in the [DOSBox-X Wiki](https://dosbox-x.com/wiki). Steps for building the source code can be found in the [BUILD](BUILD.md) page.
 
-DOSBox-X is completely open-source and free of charge to use and distribute. It is released under the [GNU General Public License, version 2](COPYING).
+DOSBox-X is completely open-source and free of charge to use and distribute. It is released under the [GNU General Public License, version 2](COPYING). See also the [About DOSBox-X](https://dosbox-x.com/about.html) page for more information about DOSBox-X's goals and non-goals, along with some links to other projects.
 
 This project has a [Code of Conduct](CODE_OF_CONDUCT.md), please read it for general information on contributing to or getting support from the project.
 
@@ -94,7 +94,7 @@ DOSBox-X is a cross-platform DOS emulator, so all major host operating systems a
 
 2. Linux (with X11), 32-bit and 64-bit
 
-3. macOS (Mac OS X) Sierra 10.12 or higher 64-bit
+3. macOS (Mac OS X), Intel and ARM-based 64-bit
 
 4. DOS (MS-DOS 5.0+ or compatible)
 
@@ -102,7 +102,9 @@ Windows binaries (both 32-bit and 64-bit), Linux Flatpak or RPM packages (64-bit
 
 For running DOSBox-X in a real DOS system (MS-DOS or compatible), you can find the HX-DOS package that makes use of the freely-available [HX DOS Extender](https://github.com/Baron-von-Riedesel/HX). Type DOSBOX-X to run it from a DOS system. There is also the DOS LOADLIN package which can run from within DOSBox-X itself in addition to a DOS system. Note, however, that not all features of DOSBox-X that are supported in other platforms can be supported in the real DOS environment.
 
-The full source code is officially provided with each DOSBox-X release, which may be compiled to run on the above and possbily other operating systems too. You can also get the latest development source code from the repository directly. See also the [BUILD](BUILD.md) page for information on building/compiling the DOSBox-X source code.
+Development (preview) builds intended for testing purposes for various platforms are also available from the [DOSBox-X Development Builds](https://dosbox-x.com/devel-build.html) page.
+
+The full source code is officially provided with each DOSBox-X release, which may be compiled to run on the above and possibly other operating systems too. You can also get the latest development source code from the repository directly. See also the [BUILD](BUILD.md) page for information on building/compiling the DOSBox-X source code.
 
 
 ## Compatibility with DOS programs and games
@@ -137,7 +139,7 @@ greatly appreciated:
   - Bug fixes, patches, improvements, refinements
   - Suggestions, ideas, assistance of other users, and/or general conversation
   - Platform support (Windows, Linux, macOS, DOS, but others are welcome)
-  - Documentation, language file translation, and software promotion
+  - Documentation, language file translation, and software packaging
   - Notes regarding DOS and Win3.x/9x games, applications, hacks or weird tricks, etc.
 
 See the [CONTRIBUTING](CONTRIBUTING.md) page for more contribution guidelines.
@@ -223,14 +225,14 @@ some things the design as implemented now cannot accommodate.
   from motherboards. The focus is on implementing hardware emulation
   for hardware made before that point.
 
-  Contributers are free to focus on emulating hardware within the
+  Contributors are free to focus on emulating hardware within the
   time frame between 1980 and 2000/2001 of their choice.
 
-* Windows guest emulation, Windows XP or later.
+* Windows guest emulation, Windows Vista or later.
 
   DOSBox-X emulation, in terms of running Windows in DOSBox-X, will
-  focus primarily on Windows 1.0 through Windows ME (Millenium Edition),
-  and then on Windows NT through Windows 2000. Windows XP and later
+  focus primarily on Windows 1.0 through Windows ME (Millennium Edition),
+  and then on Windows NT through Windows XP. Windows Vista and later
   versions are not a priority and will not be considered at this time.
   These versions of Windows are not based on DOS.
 
@@ -328,7 +330,7 @@ years ago, the project is still in semi-active development today
 in the form of DOSBox SVN. Meanwhile, some of the changes themselves
 incorporated code from other projects.
 
-Some features and improvments in DOSBox-X also came from another
+Some features and improvements in DOSBox-X also came from another
 branch of DOSBox known as [DOSBox SVN Daum](http://ykhwong.x-y.net)
 which itself incorporated features from the original DOSBox
 project, DOSBox-X, and many experimental patches. Although the
@@ -364,7 +366,7 @@ See also the [CREDITS](CREDITS.md) page for crediting of the source code.
 
 * DOSBoxWP (for WordPerfect for DOS) by emendelson
 
-  DOSBoxWP is a customized version of DOSBox-X targetted for users of WordPerfect for DOS.
+  DOSBoxWP is a customized version of DOSBox-X targeted for users of WordPerfect for DOS.
 
   URL (Windows): http://www.columbia.edu/~em36/wpdos/dosboxwp.html
 
@@ -388,21 +390,17 @@ a non-English language, you are encouraged to create additional language files f
 messages in DOSBox-X to your language. Other DOSBox-X users can also use these language files for DOSBox-X to display
 messages in such languages. There are several language files available in the DOSBox-X repository, e.g.:
 
-* Chinese (Simplified) language file: [contrib/translations/zh/zh_CN.lng](https://github.com/joncampbell123/dosbox-x/blob/master/contrib/translations/zh/zh_CN.lng)
-
-* Chinese (Traditional) language file: [contrib/translations/zh/zh_TW.lng](https://github.com/joncampbell123/dosbox-x/blob/master/contrib/translations/zh/zh_TW.lng)
-
-* French language file: [contrib/translations/fr/fr_FR.lng](https://github.com/joncampbell123/dosbox-x/blob/master/contrib/translations/fr/fr_FR.lng)
-
-* Japanese language file: [contrib/translations/ja/ja_JP.lng](https://github.com/joncampbell123/dosbox-x/blob/master/contrib/translations/ja/ja_JP.lng)
-
-* Korean language file: [contrib/translations/ko/ko_KR.lng](https://github.com/joncampbell123/dosbox-x/blob/master/contrib/translations/ko/ko_KR.lng)
-
-* Portuguese (Brazilian) language file: [contrib/translations/pt/pt_BR.lng](https://github.com/joncampbell123/dosbox-x/blob/master/contrib/translations/pt/pt_BR.lng)
-
-* Spanish language file: [contrib/translations/es/es_ES.lng](https://github.com/joncampbell123/dosbox-x/blob/master/contrib/translations/es/es_ES.lng)
-
-* Turkish language file: [contrib/translations/tr/tr_TR.lng](https://github.com/joncampbell123/dosbox-x/blob/master/contrib/translations/tr/tr_TR.lng)
+|Language name|Language file|
+| --- | --- |
+|Chinese (Simplified)|[contrib/translations/zh/zh_CN.lng](https://github.com/joncampbell123/dosbox-x/blob/master/contrib/translations/zh/zh_CN.lng)|
+|Chinese (Traditional)|[contrib/translations/zh/zh_TW.lng](https://github.com/joncampbell123/dosbox-x/blob/master/contrib/translations/zh/zh_TW.lng)|
+|French|[contrib/translations/fr/fr_FR.lng](https://github.com/joncampbell123/dosbox-x/blob/master/contrib/translations/fr/fr_FR.lng)|
+|German|[contrib/translations/de/de_DE.lng](https://github.com/joncampbell123/dosbox-x/blob/master/contrib/translations/de/de_DE.lng)|
+|Japanese|[contrib/translations/ja/ja_JP.lng](https://github.com/joncampbell123/dosbox-x/blob/master/contrib/translations/ja/ja_JP.lng)|
+|Korean|[contrib/translations/ko/ko_KR.lng](https://github.com/joncampbell123/dosbox-x/blob/master/contrib/translations/ko/ko_KR.lng)|
+|Portuguese (Brazilian)|[contrib/translations/pt/pt_BR.lng](https://github.com/joncampbell123/dosbox-x/blob/master/contrib/translations/pt/pt_BR.lng)|
+|Spanish|[contrib/translations/es/es_ES.lng](https://github.com/joncampbell123/dosbox-x/blob/master/contrib/translations/es/es_ES.lng)|
+|Turkish|[contrib/translations/tr/tr_TR.lng](https://github.com/joncampbell123/dosbox-x/blob/master/contrib/translations/tr/tr_TR.lng)|
 
 The fact that DOSBox-X was developed around the U.S. keyboard layout is primarily due to limitations around the SDL1
 library which provides input handling. As such when using the SDL1 version and a non-US keyboard, DOSBox-X automatically

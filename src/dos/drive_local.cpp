@@ -52,6 +52,10 @@
 #include "render.h"
 #include "jfont.h"
 
+#if defined(EMSCRIPTEN) || defined(HAIKU)
+#include <fcntl.h>
+#endif
+
 #include "cp437_uni.h"
 #include "cp737_uni.h"
 #include "cp775_uni.h"
@@ -60,8 +64,10 @@
 #include "cp852_uni.h"
 #include "cp853_uni.h"
 #include "cp855_uni.h"
+#include "cp856_uni.h"
 #include "cp857_uni.h"
 #include "cp858_uni.h"
+#include "cp859_uni.h"
 #include "cp860_uni.h"
 #include "cp861_uni.h"
 #include "cp862_uni.h"
@@ -69,6 +75,8 @@
 #include "cp864_uni.h"
 #include "cp865_uni.h"
 #include "cp866_uni.h"
+#include "cp867_uni.h"
+#include "cp868_uni.h"
 #include "cp869_uni.h"
 #include "cp872_uni.h"
 #include "cp874_uni.h"
@@ -88,6 +96,12 @@
 #include "cp1258_uni.h"
 #include "cp3021_uni.h"
 
+#if defined (WIN32)
+#include <Shellapi.h>
+#else
+#include <glob.h>
+#endif
+
 #if defined(PATH_MAX) && !defined(MAX_PATH)
 #define MAX_PATH PATH_MAX
 #endif
@@ -105,7 +119,8 @@ uint16_t customcp_to_unicode[256], altcp_to_unicode[256];
 extern uint16_t cpMap_AX[32];
 extern uint16_t cpMap_PC98[256];
 extern std::map<int, int> lowboxdrawmap, pc98boxdrawmap;
-bool cpwarn_once = false, ignorespecial = false;
+int tryconvertcp = 0;
+bool cpwarn_once = false, ignorespecial = false, notrycp = false;
 std::string prefix_local = ".DBLOCALFILE";
 
 char* GetCrossedName(const char *basedir, const char *dir) {
@@ -208,13 +223,14 @@ template <class MT> bool String_DBCS_TO_HOST_UTF16(uint16_t *d/*CROSS_LEN*/,cons
     const char *ss = s;
 
     while (*s != 0 && s < sf) {
+        if (morelen && !(dos.loaded_codepage == 932
 #if defined(USE_TTF)
-        if (morelen && !(dos.loaded_codepage == 932 && halfwidthkana) && (std::find(bdlist.begin(), bdlist.end(), (uint16_t)(baselen + s - ss)) != bdlist.end() || (isKanji1(*s) && (!(*(s+1)) || !isKanji2(*(s+1)))))) {
+        && halfwidthkana
+#endif
+        ) && (std::find(bdlist.begin(), bdlist.end(), (uint16_t)(baselen + s - ss)) != bdlist.end() || (isKanji1(*s) && (!(*(s+1)) || !isKanji2(*(s+1)))))) {
             *d++ = cp437_to_unicode[(uint8_t)*s++];
             continue;
-        } else
-#endif
-            if (morelen && IS_JEGA_ARCH && (uint8_t)(*s) && (uint8_t)(*s)<32) {
+        } else if (morelen && IS_JEGA_ARCH && (uint8_t)(*s) && (uint8_t)(*s)<32) {
             *d++ = cpMap_AX[(uint8_t)*s++];
             continue;
         } else if (morelen && IS_PC98_ARCH && pc98boxdrawmap.find((uint8_t)*s) != pc98boxdrawmap.end()) {
@@ -259,13 +275,14 @@ template <class MT> bool String_DBCS_TO_HOST_UTF8(char *d/*CROSS_LEN*/,const cha
     const char *ss = s;
 
     while (*s != 0 && s < sf) {
+        if (morelen && !(dos.loaded_codepage == 932
 #if defined(USE_TTF)
-        if (morelen && !(dos.loaded_codepage == 932 && halfwidthkana) && (std::find(bdlist.begin(), bdlist.end(), (uint16_t)(baselen + s - ss)) != bdlist.end() || (isKanji1(*s) && (!(*(s+1)) || !isKanji2(*(s+1))))) && utf8_encode(&d,df,(uint32_t)cp437_to_unicode[(uint8_t)*s]) >= 0) {
+        && halfwidthkana
+#endif
+        ) && (std::find(bdlist.begin(), bdlist.end(), (uint16_t)(baselen + s - ss)) != bdlist.end() || (isKanji1(*s) && (!(*(s+1)) || !isKanji2(*(s+1))))) && utf8_encode(&d,df,(uint32_t)cp437_to_unicode[(uint8_t)*s]) >= 0) {
             s++;
             continue;
-        } else
-#endif
-        if (morelen && IS_JEGA_ARCH && (uint8_t)(*s) && (uint8_t)(*s)<32) {
+        } else if (morelen && IS_JEGA_ARCH && (uint8_t)(*s) && (uint8_t)(*s)<32) {
             uint16_t oc = cpMap_AX[(uint8_t)*s];
             if (utf8_encode(&d,df,(uint32_t)oc) >= 0) {
                 s++;
@@ -327,7 +344,7 @@ template <class MT> bool String_DBCS_TO_HOST_UTF8(char *d/*CROSS_LEN*/,const cha
 
 // TODO: This is SLOW. Optimize.
 template <class MT> int SBCS_From_Host_Find(int c,const MT *map,const size_t map_max) {
-    if (morelen && (MT)c<0x20 && map[c] == cp437_to_unicode[c]) return c;
+    if (morelen && (MT)c<0x20 && c >= 0 && c < 256 && map[c] == cp437_to_unicode[c]) return c;
     for (size_t i=0;i < map_max;i++) {
         if ((MT)c == map[i])
             return (int)i;
@@ -386,7 +403,7 @@ template <class MT> bool String_HOST_TO_DBCS_UTF16(char *d/*CROSS_LEN*/,const ui
             int wc = SBCS_From_Host_Find<MT>(ic,cp437_to_unicode,sizeof(cp437_to_unicode)/sizeof(cp437_to_unicode[0]));
             auto it = pc98boxdrawmap.find(wc);
             if (it != pc98boxdrawmap.end()) {
-                *d++ = 0x86;
+                *d++ = (char)0x86;
                 *d++ = it->second;
                 continue;
             }
@@ -456,7 +473,7 @@ template <class MT> bool String_HOST_TO_DBCS_UTF8(char *d/*CROSS_LEN*/,const cha
             int wc = SBCS_From_Host_Find<MT>(ic,cp437_to_unicode,sizeof(cp437_to_unicode)/sizeof(cp437_to_unicode[0]));
             auto it = pc98boxdrawmap.find(wc);
             if (it != pc98boxdrawmap.end()) {
-                *d++ = 0x86;
+                *d++ = (char)0x86;
                 *d++ = it->second;
                 continue;
             }
@@ -618,10 +635,14 @@ bool CodePageHostToGuestUTF16(char *d/*CROSS_LEN*/,const uint16_t *s/*CROSS_LEN*
             return String_HOST_TO_SBCS_UTF16<uint16_t>(d,s,cp853_to_unicode,sizeof(cp853_to_unicode)/sizeof(cp853_to_unicode[0]));
         case 855:
             return String_HOST_TO_SBCS_UTF16<uint16_t>(d,s,cp855_to_unicode,sizeof(cp855_to_unicode)/sizeof(cp855_to_unicode[0]));
+        case 856:
+            return String_HOST_TO_SBCS_UTF16<uint16_t>(d,s,cp856_to_unicode,sizeof(cp856_to_unicode)/sizeof(cp856_to_unicode[0]));
         case 857:
             return String_HOST_TO_SBCS_UTF16<uint16_t>(d,s,cp857_to_unicode,sizeof(cp857_to_unicode)/sizeof(cp857_to_unicode[0]));
         case 858:
             return String_HOST_TO_SBCS_UTF16<uint16_t>(d,s,cp858_to_unicode,sizeof(cp858_to_unicode)/sizeof(cp858_to_unicode[0]));
+        case 859:
+            return String_HOST_TO_SBCS_UTF16<uint16_t>(d,s,cp859_to_unicode,sizeof(cp859_to_unicode)/sizeof(cp859_to_unicode[0]));
         case 860:
             return String_HOST_TO_SBCS_UTF16<uint16_t>(d,s,cp860_to_unicode,sizeof(cp860_to_unicode)/sizeof(cp860_to_unicode[0]));
         case 861:
@@ -636,6 +657,10 @@ bool CodePageHostToGuestUTF16(char *d/*CROSS_LEN*/,const uint16_t *s/*CROSS_LEN*
             return String_HOST_TO_SBCS_UTF16<uint16_t>(d,s,cp865_to_unicode,sizeof(cp865_to_unicode)/sizeof(cp865_to_unicode[0]));
         case 866:
             return String_HOST_TO_SBCS_UTF16<uint16_t>(d,s,cp866_to_unicode,sizeof(cp866_to_unicode)/sizeof(cp866_to_unicode[0]));
+        case 867:
+            return String_HOST_TO_SBCS_UTF16<uint16_t>(d,s,cp867_to_unicode,sizeof(cp867_to_unicode)/sizeof(cp867_to_unicode[0]));
+        case 868:
+            return String_HOST_TO_SBCS_UTF16<uint16_t>(d,s,cp868_to_unicode,sizeof(cp868_to_unicode)/sizeof(cp868_to_unicode[0]));
         case 869:
             return String_HOST_TO_SBCS_UTF16<uint16_t>(d,s,cp869_to_unicode,sizeof(cp869_to_unicode)/sizeof(cp869_to_unicode[0]));
         case 872:
@@ -708,10 +733,14 @@ bool CodePageHostToGuestUTF8(char *d/*CROSS_LEN*/,const char *s/*CROSS_LEN*/) {
             return String_HOST_TO_SBCS_UTF8<uint16_t>(d,s,cp853_to_unicode,sizeof(cp853_to_unicode)/sizeof(cp853_to_unicode[0]));
         case 855:
             return String_HOST_TO_SBCS_UTF8<uint16_t>(d,s,cp855_to_unicode,sizeof(cp855_to_unicode)/sizeof(cp855_to_unicode[0]));
+        case 856:
+            return String_HOST_TO_SBCS_UTF8<uint16_t>(d,s,cp856_to_unicode,sizeof(cp856_to_unicode)/sizeof(cp856_to_unicode[0]));
         case 857:
             return String_HOST_TO_SBCS_UTF8<uint16_t>(d,s,cp857_to_unicode,sizeof(cp857_to_unicode)/sizeof(cp857_to_unicode[0]));
         case 858:
             return String_HOST_TO_SBCS_UTF8<uint16_t>(d,s,cp858_to_unicode,sizeof(cp858_to_unicode)/sizeof(cp858_to_unicode[0]));
+        case 859:
+            return String_HOST_TO_SBCS_UTF8<uint16_t>(d,s,cp859_to_unicode,sizeof(cp859_to_unicode)/sizeof(cp859_to_unicode[0]));
         case 860:
             return String_HOST_TO_SBCS_UTF8<uint16_t>(d,s,cp860_to_unicode,sizeof(cp860_to_unicode)/sizeof(cp860_to_unicode[0]));
         case 861:
@@ -726,6 +755,10 @@ bool CodePageHostToGuestUTF8(char *d/*CROSS_LEN*/,const char *s/*CROSS_LEN*/) {
             return String_HOST_TO_SBCS_UTF8<uint16_t>(d,s,cp865_to_unicode,sizeof(cp865_to_unicode)/sizeof(cp865_to_unicode[0]));
         case 866:
             return String_HOST_TO_SBCS_UTF8<uint16_t>(d,s,cp866_to_unicode,sizeof(cp866_to_unicode)/sizeof(cp866_to_unicode[0]));
+        case 867:
+            return String_HOST_TO_SBCS_UTF8<uint16_t>(d,s,cp867_to_unicode,sizeof(cp867_to_unicode)/sizeof(cp867_to_unicode[0]));
+        case 868:
+            return String_HOST_TO_SBCS_UTF8<uint16_t>(d,s,cp868_to_unicode,sizeof(cp868_to_unicode)/sizeof(cp868_to_unicode[0]));
         case 869:
             return String_HOST_TO_SBCS_UTF8<uint16_t>(d,s,cp869_to_unicode,sizeof(cp869_to_unicode)/sizeof(cp869_to_unicode[0]));
         case 872:
@@ -798,10 +831,14 @@ bool CodePageGuestToHostUTF16(uint16_t *d/*CROSS_LEN*/,const char *s/*CROSS_LEN*
             return String_SBCS_TO_HOST_UTF16<uint16_t>(d,s,cp853_to_unicode,sizeof(cp853_to_unicode)/sizeof(cp853_to_unicode[0]));
         case 855:
             return String_SBCS_TO_HOST_UTF16<uint16_t>(d,s,cp855_to_unicode,sizeof(cp855_to_unicode)/sizeof(cp855_to_unicode[0]));
+        case 856:
+            return String_SBCS_TO_HOST_UTF16<uint16_t>(d,s,cp856_to_unicode,sizeof(cp856_to_unicode)/sizeof(cp856_to_unicode[0]));
         case 857:
             return String_SBCS_TO_HOST_UTF16<uint16_t>(d,s,cp857_to_unicode,sizeof(cp857_to_unicode)/sizeof(cp857_to_unicode[0]));
         case 858:
             return String_SBCS_TO_HOST_UTF16<uint16_t>(d,s,cp858_to_unicode,sizeof(cp858_to_unicode)/sizeof(cp858_to_unicode[0]));
+        case 859:
+            return String_SBCS_TO_HOST_UTF16<uint16_t>(d,s,cp859_to_unicode,sizeof(cp859_to_unicode)/sizeof(cp859_to_unicode[0]));
         case 860:
             return String_SBCS_TO_HOST_UTF16<uint16_t>(d,s,cp860_to_unicode,sizeof(cp860_to_unicode)/sizeof(cp860_to_unicode[0]));
         case 861:
@@ -816,6 +853,10 @@ bool CodePageGuestToHostUTF16(uint16_t *d/*CROSS_LEN*/,const char *s/*CROSS_LEN*
             return String_SBCS_TO_HOST_UTF16<uint16_t>(d,s,cp865_to_unicode,sizeof(cp865_to_unicode)/sizeof(cp865_to_unicode[0]));
         case 866:
             return String_SBCS_TO_HOST_UTF16<uint16_t>(d,s,cp866_to_unicode,sizeof(cp866_to_unicode)/sizeof(cp866_to_unicode[0]));
+        case 867:
+            return String_SBCS_TO_HOST_UTF16<uint16_t>(d,s,cp867_to_unicode,sizeof(cp867_to_unicode)/sizeof(cp867_to_unicode[0]));
+        case 868:
+            return String_SBCS_TO_HOST_UTF16<uint16_t>(d,s,cp868_to_unicode,sizeof(cp868_to_unicode)/sizeof(cp868_to_unicode[0]));
         case 869:
             return String_SBCS_TO_HOST_UTF16<uint16_t>(d,s,cp869_to_unicode,sizeof(cp869_to_unicode)/sizeof(cp869_to_unicode[0]));
         case 872:
@@ -888,10 +929,14 @@ bool CodePageGuestToHostUTF8(char *d/*CROSS_LEN*/,const char *s/*CROSS_LEN*/) {
             return String_SBCS_TO_HOST_UTF8<uint16_t>(d,s,cp853_to_unicode,sizeof(cp853_to_unicode)/sizeof(cp853_to_unicode[0]));
         case 855:
             return String_SBCS_TO_HOST_UTF8<uint16_t>(d,s,cp855_to_unicode,sizeof(cp855_to_unicode)/sizeof(cp855_to_unicode[0]));
+        case 856:
+            return String_SBCS_TO_HOST_UTF8<uint16_t>(d,s,cp856_to_unicode,sizeof(cp856_to_unicode)/sizeof(cp856_to_unicode[0]));
         case 857:
             return String_SBCS_TO_HOST_UTF8<uint16_t>(d,s,cp857_to_unicode,sizeof(cp857_to_unicode)/sizeof(cp857_to_unicode[0]));
         case 858:
             return String_SBCS_TO_HOST_UTF8<uint16_t>(d,s,cp858_to_unicode,sizeof(cp858_to_unicode)/sizeof(cp858_to_unicode[0]));
+        case 859:
+            return String_SBCS_TO_HOST_UTF8<uint16_t>(d,s,cp859_to_unicode,sizeof(cp859_to_unicode)/sizeof(cp859_to_unicode[0]));
         case 860:
             return String_SBCS_TO_HOST_UTF8<uint16_t>(d,s,cp860_to_unicode,sizeof(cp860_to_unicode)/sizeof(cp860_to_unicode[0]));
         case 861:
@@ -906,6 +951,10 @@ bool CodePageGuestToHostUTF8(char *d/*CROSS_LEN*/,const char *s/*CROSS_LEN*/) {
             return String_SBCS_TO_HOST_UTF8<uint16_t>(d,s,cp865_to_unicode,sizeof(cp865_to_unicode)/sizeof(cp865_to_unicode[0]));
         case 866:
             return String_SBCS_TO_HOST_UTF8<uint16_t>(d,s,cp866_to_unicode,sizeof(cp866_to_unicode)/sizeof(cp866_to_unicode[0]));
+        case 867:
+            return String_SBCS_TO_HOST_UTF8<uint16_t>(d,s,cp867_to_unicode,sizeof(cp867_to_unicode)/sizeof(cp867_to_unicode[0]));
+        case 868:
+            return String_SBCS_TO_HOST_UTF8<uint16_t>(d,s,cp868_to_unicode,sizeof(cp868_to_unicode)/sizeof(cp868_to_unicode[0]));
         case 869:
             return String_SBCS_TO_HOST_UTF8<uint16_t>(d,s,cp869_to_unicode,sizeof(cp869_to_unicode)/sizeof(cp869_to_unicode[0]));
         case 872:
@@ -960,6 +1009,15 @@ bool CodePageGuestToHostUTF8(char *d/*CROSS_LEN*/,const char *s/*CROSS_LEN*/) {
 
 host_cnv_char_t *CodePageGuestToHost(const char *s) {
 #if defined(host_cnv_use_wchar)
+    uint16_t cp = GetACP(), cpbak = dos.loaded_codepage;
+    if (tryconvertcp && !notrycp && cpbak == 437 && (cp == 932 || cp == 936 || cp == 949 || cp == 950 || cp == 951)) {
+        dos.loaded_codepage = cp;
+        if (CodePageGuestToHostUTF16((uint16_t *)cpcnv_temp,s)) {
+            dos.loaded_codepage = cpbak;
+            return cpcnv_temp;
+        } else
+            dos.loaded_codepage = cpbak;
+    }
     if (!CodePageGuestToHostUTF16((uint16_t *)cpcnv_temp,s))
 #else
     if (!CodePageGuestToHostUTF8((char *)cpcnv_temp,s))
@@ -971,6 +1029,15 @@ host_cnv_char_t *CodePageGuestToHost(const char *s) {
 
 char *CodePageHostToGuest(const host_cnv_char_t *s) {
 #if defined(host_cnv_use_wchar)
+    uint16_t cp = GetACP(), cpbak = dos.loaded_codepage;
+    if (tryconvertcp && !notrycp && cpbak == 437 && (cp == 932 || cp == 936 || cp == 949 || cp == 950 || cp == 951)) {
+        dos.loaded_codepage = cp;
+        if (CodePageHostToGuestUTF16((char *)cpcnv_temp,(const uint16_t *)s)) {
+            dos.loaded_codepage = cpbak;
+            return (char *)cpcnv_temp;
+        } else
+            dos.loaded_codepage = cpbak;
+    }
     if (!CodePageHostToGuestUTF16((char *)cpcnv_temp,(const uint16_t *)s))
 #else
     if (!CodePageHostToGuestUTF8((char *)cpcnv_temp,(char *)s))
@@ -982,6 +1049,15 @@ char *CodePageHostToGuest(const host_cnv_char_t *s) {
 
 char *CodePageHostToGuestL(const host_cnv_char_t *s) {
 #if defined(host_cnv_use_wchar)
+    uint16_t cp = GetACP(), cpbak = dos.loaded_codepage;
+    if (tryconvertcp && !notrycp && cpbak == 437 && (cp == 932 || cp == 936 || cp == 949 || cp == 950 || cp == 951)) {
+        dos.loaded_codepage = cp;
+        if (CodePageHostToGuestUTF16((char *)cpcnv_ltemp,(const uint16_t *)s)) {
+            dos.loaded_codepage = cpbak;
+            return (char *)cpcnv_ltemp;
+        } else
+            dos.loaded_codepage = cpbak;
+    }
     if (!CodePageHostToGuestUTF16((char *)cpcnv_ltemp,(const uint16_t *)s))
 #else
     if (!CodePageHostToGuestUTF8((char *)cpcnv_ltemp,(char *)s))
@@ -1002,7 +1078,7 @@ int FileDirExistCP(const char *name) {
 int FileDirExistUTF8(std::string &localname, const char *name) {
     int cp = dos.loaded_codepage;
 #ifdef WIN32
-    dos.loaded_codepage = GetOEMCP();
+    dos.loaded_codepage = GetACP();
 #else
     return 0;
 #endif
@@ -1020,32 +1096,43 @@ int FileDirExistUTF8(std::string &localname, const char *name) {
 extern uint16_t fztime, fzdate;
 extern bool force_conversion, InitCodePage();
 std::string GetDOSBoxXPath(bool withexe=false);
-void getdrivezpath(std::string &path, std::string dirname) {
+void getdrivezpath(std::string &path, std::string const& dirname) {
     const host_cnv_char_t* host_name = CodePageGuestToHost(path.c_str());
     if (host_name == NULL) {path = "";return;}
     struct stat cstat;
     ht_stat_t hstat;
     int res=host_name == NULL?stat(path.c_str(),&cstat):ht_stat(host_name,&hstat);
-    if(res==-1 || !((host_name == NULL?cstat.st_mode:hstat.st_mode) & S_IFDIR)) {
+    bool ret=res==-1?false:((host_name == NULL?cstat.st_mode:hstat.st_mode) & S_IFDIR);
+    if (!ret) {
         path = GetDOSBoxXPath();
         if (path.size()) {
             path += dirname;
             host_name = CodePageGuestToHost(path.c_str());
             res=host_name == NULL?stat(path.c_str(),&cstat):ht_stat(host_name,&hstat);
+            ret=res==-1?false:((host_name == NULL?cstat.st_mode:hstat.st_mode) & S_IFDIR);
         }
-        if(!path.size() || res==-1 || ((host_name == NULL?cstat.st_mode:hstat.st_mode) & S_IFDIR) == 0) {
+        if (!path.size() || !ret) {
             path = "";
-            Cross::CreatePlatformConfigDir(path);
+            Cross::GetPlatformConfigDir(path);
             path += dirname;
             host_name = CodePageGuestToHost(path.c_str());
             res=host_name == NULL?stat(path.c_str(),&cstat):ht_stat(host_name,&hstat);
-            if(res==-1 || ((host_name == NULL?cstat.st_mode:hstat.st_mode) & S_IFDIR) == 0)
+            ret=res==-1?false:((host_name == NULL?cstat.st_mode:hstat.st_mode) & S_IFDIR);
+            if (!ret) {
                 path = "";
+                Cross::GetPlatformResDir(path);
+                path += dirname;
+                host_name = CodePageGuestToHost(path.c_str());
+                res=host_name == NULL?stat(path.c_str(),&cstat):ht_stat(host_name,&hstat);
+                ret=res==-1?false:((host_name == NULL?cstat.st_mode:hstat.st_mode) & S_IFDIR);
+                if (!ret)
+                    path = "";
+            }
         }
     }
 }
 
-void drivezRegister(std::string path, std::string dir, bool usecp) {
+void drivezRegister(std::string const& path, std::string const& dir, bool usecp) {
     int cp = dos.loaded_codepage;
     if (!usecp || !cp) {
         force_conversion = true;
@@ -1083,9 +1170,18 @@ void drivezRegister(std::string path, std::string dir, bool usecp) {
         if (d) {
             while ((dir = readdir(d)) != NULL) {
                 host_cnv_char_t *temp_name = CodePageHostToGuest(dir->d_name);
-                if (dir->d_type == DT_REG)
+#if defined(HAIKU)
+                struct stat path_stat;
+                stat(dir->d_name, &path_stat);
+                bool is_regular_file = S_ISREG(path_stat.st_mode);
+                bool is_directory = S_ISDIR(path_stat.st_mode);
+#else
+                bool is_regular_file = (dir->d_type == DT_REG);
+                bool is_directory = (dir->d_type == DT_DIR);
+#endif
+                if (is_regular_file)
                     names.push_back(temp_name!=NULL?temp_name:dir->d_name);
-                else if (dir->d_type == DT_DIR && strcmp(temp_name != NULL ? temp_name : dir->d_name, ".") && strcmp(temp_name != NULL ? temp_name : dir->d_name, ".."))
+                else if (is_directory && strcmp(temp_name != NULL ? temp_name : dir->d_name, ".") && strcmp(temp_name != NULL ? temp_name : dir->d_name, ".."))
                     names.push_back(std::string(temp_name != NULL ? temp_name : dir->d_name) + "/");
             }
             closedir(d);
@@ -1109,7 +1205,13 @@ void drivezRegister(std::string path, std::string dir, bool usecp) {
                 host_name = CodePageGuestToHost((GetDOSBoxXPath()+path+CROSS_FILESPLIT+name).c_str());
                 res = ht_stat(host_name,&temp_stat);
             }
-            if (res==0&&(ltime=localtime(&temp_stat.st_mtime))!=0) {
+            if (res==0&&(ltime=
+#if defined(__MINGW32__) && !defined(HX_DOS)
+            _localtime64
+#else
+            localtime
+#endif
+            (&temp_stat.st_mtime))!=0) {
                 fztime=DOS_PackTime((uint16_t)ltime->tm_hour,(uint16_t)ltime->tm_min,(uint16_t)ltime->tm_sec);
                 fzdate=DOS_PackDate((uint16_t)(ltime->tm_year+1900),(uint16_t)(ltime->tm_mon+1),(uint16_t)ltime->tm_mday);
             }
@@ -1151,7 +1253,7 @@ void drivezRegister(std::string path, std::string dir, bool usecp) {
             f_size=ftell(f);
             f_data=(uint8_t*)malloc(f_size);
             fseek(f, 0, SEEK_SET);
-            fread(f_data, sizeof(char), f_size, f);
+            if (f_data) fread(f_data, sizeof(char), f_size, f);
             fclose(f);
         }
         if (f_data) VFILE_Register(name.c_str(), f_data, f_size, dir=="/"?"":dir.c_str());
@@ -1231,8 +1333,15 @@ bool localDrive::FileCreate(DOS_File * * file,const char * name,uint16_t attribu
         if (nHandle == -1) {CloseHandle(handle);return false;}
         hand = _wfdopen(nHandle, L"wb+");
 #else
-        int fd = open(host_name, O_RDWR | O_CREAT, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH | S_IWOTH);
-        if (fd<0) {close(fd);return false;}
+        int fd = open(host_name,
+#if defined(O_DIRECT)
+            (file_access_tries>0 ? O_DIRECT : 0) |
+#endif
+            O_RDWR | O_CREAT, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH | S_IWOTH);
+        if (fd<0) {return false;}
+#if defined(F_NOCACHE)
+        if (file_access_tries>0) fcntl(fd, F_NOCACHE, 1);
+#endif
         hand = fdopen(fd, "wb+");
 #endif
     } else {
@@ -1246,7 +1355,7 @@ bool localDrive::FileCreate(DOS_File * * file,const char * name,uint16_t attribu
 		LOG_MSG("Warning: file creation failed: %s",newname);
 		return false;
 	}
-   
+
 	if(!existing_file) {
 		strcpy(newname,basedir);
 		strcat(newname,name);
@@ -1391,12 +1500,13 @@ bool localDrive::FileOpen(DOS_File * * file,const char * name,uint32_t flags) {
 			break;
 		}
 	}
-	for (i=0;i<DOS_FILES;i++) {
-		if (Files[i] && Files[i]->IsOpen() && Files[i]->GetDrive()==drive && Files[i]->IsName(name)) {
-			lfp=dynamic_cast<localFile*>(Files[i]);
-			if (lfp) lfp->Flush();
-		}
-	}
+    if(!dos_kernel_disabled)
+        for(i = 0; i < DOS_FILES; i++) {
+            if(Files[i] && Files[i]->IsOpen() && Files[i]->GetDrive() == drive && Files[i]->IsName(name)) {
+                lfp = dynamic_cast<localFile*>(Files[i]);
+                if(lfp) lfp->Flush();
+            }
+        }
 
     // guest to host code page translation
     const host_cnv_char_t* host_name = CodePageGuestToHost(newname);
@@ -1419,7 +1529,7 @@ bool localDrive::FileOpen(DOS_File * * file,const char * name,uint32_t flags) {
 #else
         uint16_t unix_mode = (flags&0xf)==OPEN_READ||(flags&0xf)==OPEN_READ_NO_MOD?O_RDONLY:((flags&0xf)==OPEN_WRITE?O_WRONLY:O_RDWR);
         int fd = open(host_name, unix_mode);
-        if (fd<0 || !share(fd, unix_mode & O_ACCMODE, flags)) {close(fd);return false;}
+        if (fd<0 || !share(fd, unix_mode & O_ACCMODE, flags)) {if (fd >= 0) close(fd);return false;}
         hand = fdopen(fd, (flags&0xf)==OPEN_WRITE?_HT("wb"):type);
 #endif
     } else {
@@ -1508,11 +1618,6 @@ bool localDrive::GetSystemFilename(char *sysName, char const * const dosName) {
 #endif
 }
 
-#if defined (WIN32)
-#include <Shellapi.h>
-#else
-#include <glob.h>
-#endif
 bool localDrive::FileUnlink(const char * name) {
     if (readonly) {
         DOS_SetError(DOSERR_WRITE_PROTECTED);
@@ -1543,7 +1648,7 @@ bool localDrive::FileUnlink(const char * name) {
 #else
 		FILE* file_writable = fopen(host_name,"rb+");
 #endif
-		if(!file_writable) return false; //No acces ? ERROR MESSAGE NOT SET. FIXME ?
+		if(!file_writable) return false; //No access ? ERROR MESSAGE NOT SET. FIXME ?
 		fclose(file_writable);
 
 		//File exists and can technically be deleted, nevertheless it failed.
@@ -1584,19 +1689,24 @@ bool localDrive::FindFirst(const char * _dir,DOS_DTA & dta,bool fcb_findfirst) {
 	strcat(tempDir,_dir);
 	CROSS_FILENAME(tempDir);
 
-	for (unsigned int i=0;i<strlen(tempDir);i++) tempDir[i]=toupper(tempDir[i]);
+	size_t len = strlen(tempDir);
+	bool lead = false;
+	for (unsigned int i=0;i<len;i++) {
+		if(lead) lead = false;
+		else if((IS_PC98_ARCH || isDBCSCP()) && isKanji1(tempDir[i])) lead = true;
+		else tempDir[i]=toupper(tempDir[i]);
+	}
     if (nocachedir) EmptyCache();
 
 	if (allocation.mediaid==0xF0 ) {
 		EmptyCache(); //rescan floppie-content on each findfirst
 	}
-    
-	
-	if (tempDir[strlen(tempDir)-1]!=CROSS_FILESPLIT) {
+
+	if (!check_last_split_char(tempDir, len, CROSS_FILESPLIT)) {
 		char end[2]={CROSS_FILESPLIT,0};
 		strcat(tempDir,end);
 	}
-	
+
 	uint16_t id;
 	if (!dirCache.FindFirst(tempDir,id)) {
 		DOS_SetError(DOSERR_PATH_NOT_FOUND);
@@ -1609,14 +1719,14 @@ bool localDrive::FindFirst(const char * _dir,DOS_DTA & dta,bool fcb_findfirst) {
 		ldid[lfn_filefind_handle]=id;
 		ldir[lfn_filefind_handle]=tempDir;
 	}
-	
+
 	uint8_t sAttr;
 	dta.GetSearchParams(sAttr,tempDir,false);
 
 	if (this->isRemote() && this->isRemovable()) {
 		// cdroms behave a bit different than regular drives
 		if (sAttr == DOS_ATTR_VOLUME) {
-			dta.SetResult(dirCache.GetLabel(),dirCache.GetLabel(),0,0,0,DOS_ATTR_VOLUME);
+			dta.SetResult(dirCache.GetLabel(),dirCache.GetLabel(),0,0,0,0,DOS_ATTR_VOLUME);
 			return true;
 		}
 	} else {
@@ -1628,13 +1738,13 @@ bool localDrive::FindFirst(const char * _dir,DOS_DTA & dta,bool fcb_findfirst) {
 				DOS_SetError(DOSERR_NO_MORE_FILES);
 				return false;
 			}
-            dta.SetResult(dirCache.GetLabel(),dirCache.GetLabel(),0,0,0,DOS_ATTR_VOLUME);
+            dta.SetResult(dirCache.GetLabel(),dirCache.GetLabel(),0,0,0,0,DOS_ATTR_VOLUME);
 			return true;
 		} else if ((sAttr & DOS_ATTR_VOLUME)  && (*_dir == 0) && !fcb_findfirst) { 
 		//should check for a valid leading directory instead of 0
 		//exists==true if the volume label matches the searchmask and the path is valid
 			if (WildFileCmp(dirCache.GetLabel(),tempDir)) {
-                dta.SetResult(dirCache.GetLabel(),dirCache.GetLabel(),0,0,0,DOS_ATTR_VOLUME);
+                dta.SetResult(dirCache.GetLabel(),dirCache.GetLabel(),0,0,0,0,DOS_ATTR_VOLUME);
 				return true;
 			}
 		}
@@ -1651,7 +1761,7 @@ bool localDrive::FindNext(DOS_DTA & dta) {
     char full_name[CROSS_LEN], lfull_name[LFN_NAMELENGTH+1];
     char dir_entcopy[CROSS_LEN], ldir_entcopy[CROSS_LEN];
 
-    uint8_t srch_attr;char srch_pattern[LFN_NAMELENGTH];
+    uint8_t srch_attr;char srch_pattern[LFN_NAMELENGTH+1];
 	uint8_t find_attr;
 
     dta.GetSearchParams(srch_attr,srch_pattern,false);
@@ -1670,7 +1780,7 @@ again:
 
 	strcpy(full_name,lfn_filefind_handle>=LFN_FILEFIND_MAX?srchInfo[id].srch_dir:(ldir[lfn_filefind_handle]!=""?ldir[lfn_filefind_handle].c_str():"\\"));
 	strcpy(lfull_name,full_name);
-	
+
 	strcat(full_name,dir_ent);
     strcat(lfull_name,ldir_ent);
 
@@ -1716,10 +1826,10 @@ again:
     }
 #endif
  	if (~srch_attr & find_attr & DOS_ATTR_DIRECTORY) goto again;
-	
+
 	/*file is okay, setup everything to be copied in DTA Block */
 	char find_name[DOS_NAMELENGTH_ASCII], lfind_name[LFN_NAMELENGTH+1];
-    uint16_t find_date,find_time;uint32_t find_size;
+    uint16_t find_date,find_time;uint32_t find_size,find_hsize;
 
 	if(strlen(dir_entcopy)<DOS_NAMELENGTH_ASCII){
 		strcpy(find_name,dir_entcopy);
@@ -1731,16 +1841,23 @@ again:
 	strcpy(lfind_name,ldir_entcopy);
     lfind_name[LFN_NAMELENGTH]=0;
 
-	find_size=(uint32_t) stat_block.st_size;
+	find_hsize=(uint32_t) (stat_block.st_size / 0x100000000);
+	find_size=(uint32_t) (stat_block.st_size % 0x100000000);
     const struct tm* time;
-	if((time=localtime(&stat_block.st_mtime))!=0){
+	if((time=
+#if defined(__MINGW32__) && !defined(HX_DOS)
+    _localtime64
+#else
+    localtime
+#endif
+    (&stat_block.st_mtime))!=0){
 		find_date=DOS_PackDate((uint16_t)(time->tm_year+1900),(uint16_t)(time->tm_mon+1),(uint16_t)time->tm_mday);
 		find_time=DOS_PackTime((uint16_t)time->tm_hour,(uint16_t)time->tm_min,(uint16_t)time->tm_sec);
 	} else {
 		find_time=6; 
 		find_date=4;
 	}
-	dta.SetResult(find_name,lfind_name,find_size,find_date,find_time,find_attr);
+	dta.SetResult(find_name,lfind_name,find_size,find_hsize,find_date,find_time,find_attr);
 	return true;
 }
 
@@ -1752,6 +1869,9 @@ void localDrive::remove_special_file_from_disk(const char* dosname, const char* 
 		ht_unlink(host_name);
 	else
 		unlink(newname.c_str());
+#else
+    (void)dosname;
+    (void)operation;
 #endif
 }
 
@@ -1776,17 +1896,22 @@ bool localDrive::add_special_file_to_disk(const char* dosname, const char* opera
 	const host_cnv_char_t* host_name = CodePageGuestToHost(newname.c_str());
 	FILE* f = fopen_wrap(host_name!=NULL?host_name:newname.c_str(),"wb+");
 	if (!f) return false;
-    size_t len = 0;
-    if (isdir != !(value & DOS_ATTR_ARCHIVE)) len |= 1;
-    if (value & DOS_ATTR_HIDDEN) len |= 2;
-    if (value & DOS_ATTR_SYSTEM) len |= 4;
-    char *buf = new char[len + 1];
+	size_t len = 0;
+	if (isdir != !(value & DOS_ATTR_ARCHIVE)) len |= 1;
+	if (value & DOS_ATTR_HIDDEN) len |= 2;
+	if (value & DOS_ATTR_SYSTEM) len |= 4;
+	char *buf = new char[len + 1];
+	memset(buf,0,len);
 	fwrite(buf,len,1,f);
 	fclose(f);
-    delete[] buf;
-    return true;
+	delete[] buf;
+	return true;
 #else
-    return false;
+    (void)dosname;
+    (void)operation;
+    (void)value;
+    (void)isdir;
+	return false;
 #endif
 }
 
@@ -1906,7 +2031,7 @@ std::string localDrive::GetHostName(const char * name) {
 	dirCache.ExpandName(newname);
 	const host_cnv_char_t* host_name = CodePageGuestToHost(newname);
 	ht_stat_t temp_stat;
-	static std::string hostname = host_name != NULL && ht_stat(host_name,&temp_stat)==0 ? newname : "";
+	static std::string hostname; hostname = host_name != NULL && ht_stat(host_name,&temp_stat)==0 ? newname : "";
 	return hostname;
 }
 
@@ -2051,7 +2176,7 @@ bool localDrive::TestDir(const char * dir) {
 
 	// Skip directory test, if "\"
 	size_t len = strlen(newdir);
-	if (len && (newdir[len-1]!='\\')) {
+	if (len && !check_last_split_char(newdir, len, '\\')) {
 		// It has to be a directory !
 		ht_stat_t test;
 		if (ht_stat(host_name,&test))		return false;
@@ -2132,7 +2257,10 @@ bool localDrive::AllocationInfo(uint16_t * _bytes_sector,uint8_t * _sectors_clus
 		if (drive>26) drive=0;
 		char root[4]="A:\\";
 		root[0]='A'+drive-1;
-		res = GetDiskFreeSpace(drive?root:NULL, &dwSectPerClust, &dwBytesPerSect, &dwFreeClusters, &dwTotalClusters);
+        if (basedir[0]=='\\' && basedir[1]=='\\')
+            res = GetDiskFreeSpace(basedir, &dwSectPerClust, &dwBytesPerSect, &dwFreeClusters, &dwTotalClusters);
+        else
+            res = GetDiskFreeSpace(drive?root:NULL, &dwSectPerClust, &dwBytesPerSect, &dwFreeClusters, &dwTotalClusters);
 		if (res) {
 			unsigned long total = dwTotalClusters * dwSectPerClust;
 			int ratio = total > 2097120 ? 64 : (total > 1048560 ? 32 : (total > 524280 ? 16 : (total > 262140 ? 8 : (total > 131070 ? 4 : (total > 65535 ? 2 : 1))))), ratio2 = ratio * dwBytesPerSect / 512;
@@ -2263,14 +2391,19 @@ bool localDrive::FileStat(const char* name, FileStat_Block * const stat_block) {
 
 	/* Convert the stat to a FileStat */
     const struct tm* time;
-	if((time=localtime(&temp_stat.st_mtime))!=0) {
+	if((time=
+#if defined(__MINGW32__) && !defined(HX_DOS)
+    _localtime64
+#else
+    localtime
+#endif
+    (&temp_stat.st_mtime))!=0) {
 		stat_block->time=DOS_PackTime((uint16_t)time->tm_hour,(uint16_t)time->tm_min,(uint16_t)time->tm_sec);
 		stat_block->date=DOS_PackDate((uint16_t)(time->tm_year+1900),(uint16_t)(time->tm_mon+1),(uint16_t)time->tm_mday);
 	}
 	stat_block->size=(uint32_t)temp_stat.st_size;
 	return true;
 }
-
 
 uint8_t localDrive::GetMediaByte(void) {
 	return allocation.mediaid;
@@ -2460,11 +2593,15 @@ bool localFile::Read(uint8_t * data,uint16_t * size) {
     }
 #endif
 	if (last_action==WRITE) {
-        fseek(fhandle,ftell(fhandle),SEEK_SET);
+		if (file_access_tries>0) {
+			off_t pos = lseek(fileno(fhandle),0,SEEK_CUR);
+			if (pos>-1) lseek(fileno(fhandle),pos,SEEK_SET);
+		} else
+			fseek(fhandle,ftell(fhandle),SEEK_SET);
         if (!newtime) UpdateLocalDateTime();
     }
 	last_action=READ;
-	*size=(uint16_t)fread(data,1,*size,fhandle);
+	*size=file_access_tries>0?(uint16_t)read(fileno(fhandle),data,*size):(uint16_t)fread(data,1,*size,fhandle);
 	/* Fake harddrive motion. Inspector Gadget with soundblaster compatible */
 	/* Same for Igor */
 	/* hardrive motion => unmask irq 2. Only do it when it's masked as unmasking is realitively heavy to emulate */
@@ -2508,16 +2645,20 @@ bool localFile::Write(const uint8_t * data,uint16_t * size) {
         return false;
     }
 #endif
-	if (last_action==READ) fseek(fhandle,ftell(fhandle),SEEK_SET);
+	if (last_action==READ) {
+		if (file_access_tries>0) {
+			off_t pos = lseek(fileno(fhandle),0,SEEK_CUR);
+			if (pos>-1) lseek(fileno(fhandle),pos,SEEK_SET);
+		} else fseek(fhandle,ftell(fhandle),SEEK_SET);
+	}
 	last_action=WRITE;
-	if(*size==0){  
-        return (!ftruncate(fileno(fhandle),ftell(fhandle)));
-    }
-    else 
-    {
-		*size=(uint16_t)fwrite(data,1,*size,fhandle);
+	if (*size==0){
+		uint32_t pos=file_access_tries>0?lseek(fileno(fhandle),0,SEEK_CUR):ftell(fhandle);
+		return !ftruncate(fileno(fhandle),pos);
+	} else {
+		*size=file_access_tries>0?(uint16_t)write(fileno(fhandle),data,*size):(uint16_t)fwrite(data,1,*size,fhandle);
 		return true;
-    }
+	}
 }
 
 #ifndef WIN32
@@ -2647,7 +2788,7 @@ bool localFile::Seek(uint32_t * pos,uint32_t type) {
 #if defined(WIN32)
     if (file_access_tries>0) {
         HANDLE hFile = (HANDLE)_get_osfhandle(_fileno(fhandle));
-        int32_t dwPtr = SetFilePointer(hFile, *pos, NULL, type);
+        DWORD dwPtr = SetFilePointer(hFile, *pos, NULL, type);
         if (dwPtr == INVALID_SET_FILE_POINTER && !strcmp(RunningProgram, "BTHORNE"))	// Fix for Black Thorne
             dwPtr = SetFilePointer(hFile, 0, NULL, DOS_SEEK_END);
         if (dwPtr != INVALID_SET_FILE_POINTER) {										// If success
@@ -2658,11 +2799,16 @@ bool localFile::Seek(uint32_t * pos,uint32_t type) {
         return false;
     }
 #endif
-	int ret=fseek(fhandle,*reinterpret_cast<int32_t*>(pos),seektype);
-	if (ret!=0) {
-		// Out of file range, pretend everythings ok 
+	bool fail;
+	if (file_access_tries>0) fail=lseek(fileno(fhandle),*reinterpret_cast<int32_t*>(pos),seektype)==-1;
+	else fail=fseek(fhandle,*reinterpret_cast<int32_t*>(pos),seektype)!=0;
+	if (fail) {
+		// Out of file range, pretend everything is ok
 		// and move file pointer top end of file... ?! (Black Thorne)
-		fseek(fhandle,0,SEEK_END);
+		if (file_access_tries>0)
+			lseek(fileno(fhandle),0,SEEK_END);
+		else
+			fseek(fhandle,0,SEEK_END);
 	}
 #if 0
 	fpos_t temppos;
@@ -2670,7 +2816,7 @@ bool localFile::Seek(uint32_t * pos,uint32_t type) {
 	uint32_t * fake_pos=(uint32_t*)&temppos;
 	*pos=*fake_pos;
 #endif
-	*pos=(uint32_t)ftell(fhandle);
+	*pos=file_access_tries>0?(uint32_t)lseek(fileno(fhandle),0,SEEK_CUR):(uint32_t)ftell(fhandle);
 	last_action=NONE;
 	return true;
 }
@@ -2738,22 +2884,20 @@ bool localFile::Close() {
 uint16_t localFile::GetInformation(void) {
 	return read_only_medium ? DeviceInfoFlags::NotWritten : 0;
 }
-	
+
 
 uint32_t localFile::GetSeekPos() {
-	return (uint32_t)ftell( fhandle );
+	return file_access_tries>0?(uint32_t)lseek(fileno(fhandle),0,SEEK_CUR):(uint32_t)ftell( fhandle );
 }
 
 localFile::localFile() {}
 
-localFile::localFile(const char* _name, FILE * handle) {
-	fhandle=handle;
+localFile::localFile(const char* _name, FILE* handle) : fhandle(handle) {
 	open=true;
 	localFile::UpdateDateTimeFromHost();
 
 	attr=DOS_ATTR_ARCHIVE;
 	last_action=NONE;
-	read_only_medium=false;
 
 	name=0;
 	SetName(_name);
@@ -2817,8 +2961,13 @@ void localFile::Flush(void) {
     if (file_access_tries>0) return;
 #endif
 	if (last_action==WRITE) {
-		fseek(fhandle,ftell(fhandle),SEEK_SET);
-        fflush(fhandle);
+		if (file_access_tries>0) {
+			off_t pos = lseek(fileno(fhandle),0,SEEK_CUR);
+			if (pos>-1) lseek(fileno(fhandle),pos,SEEK_SET);
+		} else {
+			fseek(fhandle,ftell(fhandle),SEEK_SET);
+			fflush(fhandle);
+		}
 		last_action=NONE;
         if (!newtime) UpdateLocalDateTime();
 	}
@@ -2835,15 +2984,12 @@ bool MSCDEX_HasMediaChanged(uint8_t subUnit);
 bool MSCDEX_GetVolumeName(uint8_t subUnit, char* name);
 
 cdromDrive::cdromDrive(const char driveLetter, const char * startdir,uint16_t _bytes_sector,uint8_t _sectors_cluster,uint16_t _total_clusters,uint16_t _free_clusters,uint8_t _mediaid, int& error, std::vector<std::string> &options)
-		   :localDrive(startdir,_bytes_sector,_sectors_cluster,_total_clusters,_free_clusters,_mediaid,options),
-		    subUnit(0),
-		    driveLetter('\0')
+		   :localDrive(startdir,_bytes_sector,_sectors_cluster,_total_clusters,_free_clusters,_mediaid,options), driveLetter(driveLetter)
 {
 	// Init mscdex
 	error = MSCDEX_AddDrive(driveLetter,startdir,subUnit);
 	strcpy(info, "CDRom ");
 	strcat(info, startdir);
-	this->driveLetter = driveLetter;
 	// Get Volume Label
 	char name[32];
 	if (MSCDEX_GetVolumeName(subUnit,name)) dirCache.SetLabel(name,true,true);

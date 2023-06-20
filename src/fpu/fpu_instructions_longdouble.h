@@ -22,14 +22,15 @@
 #ifdef __GNUC__
 # if defined(__MINGW32__) || (defined(MACOSX) && !defined(__arm64__))
 #  include "fpu_control_x86.h"
-# elif defined(ANDROID) || defined(__ANDROID__) || (defined(MACOSX) && defined(__arm64__)) || defined(EMSCRIPTEN)
+# elif defined(ANDROID) || defined(__ANDROID__) || (defined(MACOSX) && defined(__arm64__)) || defined(EMSCRIPTEN) || defined(__powerpc__)
 /* ? */
 #  define _FPU_SETCW(x) /* dummy */
 # else
 #  include <fpu_control.h>
 # endif
 static inline void FPU_SyncCW(void) {
-    _FPU_SETCW(fpu.cw);
+    uint16_t tmp = fpu.cw | 0x80 | 0x3F; // HACK: Disable all FPU exceptions until DOSBox-X can catch and reflect FPU exceptions to the guest
+    _FPU_SETCW(tmp);
 }
 #else
 static inline void FPU_SyncCW(void) {
@@ -537,8 +538,8 @@ static void FPU_FSCALE(void){
 	return; //2^x where x is chopped.
 }
 
-static void FPU_FSTENV(PhysPt addr){
-	if(!cpu.code.big) {
+static void FPU_FSTENV(PhysPt addr, bool op16){
+	if (op16) {
 		mem_writew(addr+0,static_cast<uint16_t>(fpu.cw));
 		mem_writew(addr+2,static_cast<uint16_t>(fpu.sw));
 		mem_writew(addr+4,static_cast<uint16_t>(FPU_GetTag()));
@@ -549,28 +550,24 @@ static void FPU_FSTENV(PhysPt addr){
 	}
 }
 
-static void FPU_FLDENV(PhysPt addr){
+static void FPU_FLDENV(PhysPt addr, bool op16){
 	uint16_t tag;
-	uint32_t tagbig;
-	Bitu cw;
-	if(!cpu.code.big) {
-		cw     = mem_readw(addr+0);
+	if (op16) {
+		fpu.cw = mem_readw(addr+0);
 		fpu.sw = mem_readw(addr+2);
 		tag    = mem_readw(addr+4);
 	} else { 
-		cw     = mem_readd(addr+0);
-		fpu.sw = (uint16_t)mem_readd(addr+4);
-		tagbig = mem_readd(addr+8);
-		tag    = static_cast<uint16_t>(tagbig);
+		fpu.cw = static_cast<uint16_t>(mem_readd(addr+0));
+		fpu.sw = static_cast<uint16_t>(mem_readd(addr+4));
+		tag    = static_cast<uint16_t>(mem_readd(addr+8));
 	}
 	FPU_SetTag(tag);
-	fpu.cw = cw;
     FPU_SyncCW();
 }
 
-static void FPU_FSAVE(PhysPt addr){
-	FPU_FSTENV(addr);
-	Bitu start = (cpu.code.big?28:14);
+static void FPU_FSAVE(PhysPt addr, bool op16){
+	FPU_FSTENV(addr, op16);
+	Bitu start = op16 ? 14:28;
 	for(Bitu i = 0;i < 8;i++){
 		FPU_ST80(addr+start,STV(i));
 		start += 10;
@@ -578,9 +575,9 @@ static void FPU_FSAVE(PhysPt addr){
 	FPU_FINIT();
 }
 
-static void FPU_FRSTOR(PhysPt addr){
-	FPU_FLDENV(addr);
-	Bitu start = (cpu.code.big?28:14);
+static void FPU_FRSTOR(PhysPt addr, bool op16){
+	FPU_FLDENV(addr, op16);
+	Bitu start = op16 ? 14:28;
 	for(Bitu i = 0;i < 8;i++){
 		fpu.regs_80[STV(i)].v = FPU_FLD80(addr+start);
 		start += 10;
@@ -613,39 +610,69 @@ static void FPU_FTST(void){
 	FPU_FCOM(TOP,8);
 }
 
+static inline void FPU_FLD_CONSTANT_ADJUST_DOWN()
+{
+	if (FPU_ArchitectureType >= FPU_ARCHTYPE_387)
+	{
+		if (fpu.cw.RC==FPUControlWord::RoundMode::Down ||
+		    fpu.cw.RC==FPUControlWord::RoundMode::Chop)
+		{
+			// On 32-bit x87 and later rounding mode affects the value
+			fpu.regs_80[TOP].f.mantissa--;
+		}
+	}
+}
+
+static inline void FPU_FLD_CONSTANT_ADJUST_UP()
+{
+	if (FPU_ArchitectureType >= FPU_ARCHTYPE_387)
+	{
+		if (fpu.cw.RC==FPUControlWord::RoundMode::Up)
+		{
+			// On 32-bit x87 and later rounding mode affects the value
+			fpu.regs_80[TOP].f.mantissa++;
+		}
+	}
+}
+
 static void FPU_FLD1(void){
 	FPU_PREP_PUSH();
-	fpu.regs_80[TOP].v = 1.0;
+	fpu.regs_80[TOP].v = 1.0L;
 }
 
 static void FPU_FLDL2T(void){
 	FPU_PREP_PUSH();
 	fpu.regs_80[TOP].v = L2T;
+	FPU_FLD_CONSTANT_ADJUST_UP();
 }
 
 static void FPU_FLDL2E(void){
 	FPU_PREP_PUSH();
 	fpu.regs_80[TOP].v = L2E;
+	FPU_FLD_CONSTANT_ADJUST_DOWN();
 }
 
 static void FPU_FLDPI(void){
 	FPU_PREP_PUSH();
 	fpu.regs_80[TOP].v = PI;
+	FPU_FLD_CONSTANT_ADJUST_DOWN();
 }
 
 static void FPU_FLDLG2(void){
 	FPU_PREP_PUSH();
 	fpu.regs_80[TOP].v = LG2;
+	FPU_FLD_CONSTANT_ADJUST_DOWN();
 }
 
 static void FPU_FLDLN2(void){
 	FPU_PREP_PUSH();
 	fpu.regs_80[TOP].v = LN2;
+	FPU_FLD_CONSTANT_ADJUST_DOWN();
 }
 
 static void FPU_FLDZ(void){
 	FPU_PREP_PUSH();
-	fpu.regs_80[TOP].v = 0.0;
+	fpu.regs_80[TOP].v = 0.0L;
 	fpu.tags[TOP] = TAG_Zero;
 }
 

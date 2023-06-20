@@ -269,13 +269,13 @@ public:
 	}
 };
 
-static BlockReturn gen_runcodeInit(uint8_t *code);
-static BlockReturn (*gen_runcode)(uint8_t *code) = gen_runcodeInit;
+static BlockReturnDynX86 gen_runcodeInit(uint8_t *code);
+static BlockReturnDynX86 (*gen_runcode)(uint8_t *code) = gen_runcodeInit;
 
-static BlockReturn gen_runcodeInit(uint8_t *code) {
+static BlockReturnDynX86 gen_runcodeInit(uint8_t *code) {
 	uint8_t* oldpos = cache.pos;
 	cache.pos = &cache_code_link_blocks[128];
-	gen_runcode = (BlockReturn(*)(uint8_t*))cache_rwtox(cache.pos);
+	gen_runcode = (BlockReturnDynX86(*)(uint8_t*))cache_rwtox(cache.pos);
 
 	opcode(5).Emit8Reg(0x50);  // push rbp
 	opcode(15).Emit8Reg(0x50); // push r15
@@ -861,6 +861,29 @@ nochange:
 	i.setrm(dst).Emit8(tmp);
 }
 
+static void gen_sop_word_imm(ShiftOps op,bool dword,DynReg * dr1,uint8_t imm) {
+	uint8_t tmp=0xC1;
+	int dst = FindDynReg(dr1,dword && op==DOP_MOV)->index;
+	opcode i;
+	i.setimm(imm, 1);
+
+	switch (op) {
+	case SHIFT_ROL:	i.setreg(0); break; 
+	case SHIFT_ROR:	i.setreg(1); break; 
+	case SHIFT_RCL:	i.setreg(2); break; 
+	case SHIFT_RCR:	i.setreg(3); break; 
+	case SHIFT_SHL:	i.setreg(4); break; 
+	case SHIFT_SHR:	i.setreg(5); break; 
+	case SHIFT_SAL:	i.setreg(6); break; 
+	case SHIFT_SAR:	i.setreg(7); break; 
+	default:
+		IllegalOption("gen_sop_word_imm");
+	}
+	dr1->flags|=DYNFLG_CHANGED;
+nochange:
+	i.setrm(dst).Emit8(tmp);
+}
+
 static void gen_dop_word(DualOps op,DynReg *dr1,opcode &i) {
 	uint8_t tmp;
 	switch (op) {
@@ -1162,7 +1185,7 @@ static void gen_fill_branch(uint8_t * data,uint8_t * from=cache.pos) {
 	Bits len=from-data-1;
 	if (len<0) len=~len;
 	if (len>127)
-		LOG_MSG("Big jump %d",len);
+		LOG_MSG("Big jump %ld",len);
 #endif
 	*data=(uint8_t)(from-data-1);
 }
@@ -1198,7 +1221,7 @@ static void gen_fill_short_jump(uint8_t * data, uint8_t * to=cache.pos) {
 	Bits len=to-data-1;
 	if (len<0) len=~len;
 	if (len>127)
-		LOG_MSG("Big jump %d",len);
+		LOG_MSG("Big jump %ld",len);
 #endif
 	data[0] = (uint8_t)(to-data-1);
 }
@@ -1235,7 +1258,7 @@ static void gen_test_host_byte(void * data, uint8_t imm) {
 	opcode(0).setimm(imm,1).setabsaddr(data).Emit8(0xF6); // test byte[], uint8_t
 }
 
-static void gen_return(BlockReturn retcode) {
+static void gen_return(BlockReturnDynX86 retcode) {
 	gen_protectflags();
 	opcode(1).setea(4,-1,0,CALLSTACK).Emit8(0x8B); // mov ecx, [rsp+8/40]
 	opcode(0).set64().setrm(4).setimm(CALLSTACK+8,1).Emit8(0x83); // add rsp,16/48
@@ -1247,7 +1270,7 @@ static void gen_return(BlockReturn retcode) {
 	opcode(4).setea(4,-1,0,CALLSTACK-8).Emit8(0xFF); // jmp [rsp+CALLSTACK-8]
 }
 
-static void gen_return_fast(BlockReturn retcode,bool ret_exception=false) {
+static void gen_return_fast(BlockReturnDynX86 retcode,bool ret_exception=false) {
 	if (GCC_UNLIKELY(x64gen.flagsactive)) IllegalOption("gen_return_fast");
 	opcode(1).setabsaddr(&reg_flags).Emit8(0x8B); // mov ECX, [cpu_regs.flags]
 	if (!ret_exception) {
@@ -1353,13 +1376,13 @@ static void gen_dh_fpu_saveInit(void) {
 	else opcode(0).set64().setimm(addr,8).Emit8Reg(0xB8);
 
 	// fnsave [dyn_dh_fpu.state]
-	opcode(6).setea(0,-1,0,offsetof(struct dyn_dh_fpu,state)).Emit8(0xdd);
+	opcode(6).setea(0,-1,0,offsetof(dyn_dh_fpu_struct,state)).Emit8(0xdd);
 	// fldcw [dyn_dh_fpu.host_cw]
-	opcode(5).setea(0,-1,0,offsetof(struct dyn_dh_fpu,host_cw)).Emit8(0xd9);
+	opcode(5).setea(0,-1,0,offsetof(dyn_dh_fpu_struct,host_cw)).Emit8(0xd9);
 	// mov byte [dyn_dh_fpu.state_used], 0
-	opcode(0).setimm(0,1).setea(0,-1,0,offsetof(struct dyn_dh_fpu,state_used)).Emit8(0xc6);
+	opcode(0).setimm(0,1).setea(0,-1,0,offsetof(dyn_dh_fpu_struct,state_used)).Emit8(0xc6);
 	// or byte [dyn_dh_fpu.state.cw], 0x3F
-	opcode(1).setimm(0x3F,1).setea(0,-1,0,offsetof(struct dyn_dh_fpu,state.cw)).Emit8(0x80);
+	opcode(1).setimm(0x3F,1).setea(0,-1,0,offsetof(dyn_dh_fpu_struct,state.cw)).Emit8(0x80);
 	cache_addb(0xC3); // RET
 
 	cache.pos = oldpos;

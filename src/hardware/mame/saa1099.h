@@ -23,7 +23,7 @@
 //  TYPE DEFINITIONS
 //**************************************************************************
 
-//Container class for int that just initalizes to 0
+//Container class for int that just initializes to 0
 class NullInt {
     int value;
 public:
@@ -52,6 +52,8 @@ public:
 	DECLARE_WRITE8_MEMBER( data_w );
 
 	DECLARE_WRITE8_MEMBER( write );
+
+	uint32_t sample_rate = clock() / 256;
 
 //protected:
 	// device-level overrides

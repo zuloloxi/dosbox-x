@@ -68,6 +68,8 @@
 #include "../libs/tinyfiledialogs/tinyfiledialogs.h"
 #endif
 
+#include <output/output_ttf.h>
+
 #ifdef DOSBOXMENU_EXTERNALLY_MANAGED
 static DOSBoxMenu guiMenu, nullMenu;
 #endif
@@ -90,6 +92,7 @@ extern unsigned char        GFX_Gshift;
 extern uint32_t             GFX_Bmask;
 extern unsigned char        GFX_Bshift;
 
+extern unsigned int         maincp;
 extern int                  aspect_ratio_x, aspect_ratio_y;
 extern int                  statusdrive, swapInDisksSpecificDrive;
 extern bool                 ttfswitch, switch_output_from_ttf, loadlang;
@@ -139,16 +142,16 @@ GUI::Checkbox *advopt, *saveall, *imgfd360, *imgfd400, *imgfd720, *imgfd1200, *i
 std::string GetDOSBoxXPath(bool withexe);
 static std::map< std::vector<GUI::Char>, GUI::ToplevelWindow* > cfg_windows_active;
 void getlogtext(std::string &str), getcodetext(std::string &text), ApplySetting(std::string pvar, std::string inputline, bool quiet), GUI_Run(bool pressed);
-void ttf_switch_on(bool ss=true), ttf_switch_off(bool ss=true), setAspectRatio(Section_prop * section), GFX_ForceRedrawScreen(void);
+void ttf_switch_on(bool ss=true), ttf_switch_off(bool ss=true), setAspectRatio(Section_prop * section), GFX_ForceRedrawScreen(void), SetWindowTransparency(int trans);
 bool CheckQuit(void), OpenGL_using(void);
 char tmp1[CROSS_LEN*2], tmp2[CROSS_LEN];
-const char *aboutmsg = "DOSBox-X version " VERSION " (" SDL_STRING ", "
+const char *aboutmsg = "DOSBox-X version " VERSION " ("
 #if defined(_M_X64) || defined (_M_AMD64) || defined (_M_ARM64) || defined (_M_IA64) || defined(__ia64__) || defined(__LP64__) || defined(_WIN64) || defined(__x86_64__) || defined(__aarch64__) || defined(__powerpc64__)
 	"64"
 #else
 	"32"
 #endif
-	"-bit)\nBuild date/time: " UPDATED_STR "\nCopyright 2011-" COPYRIGHT_END_YEAR " The DOSBox-X Team\nProject maintainer: joncampbell123\nDOSBox-X homepage: https://dosbox-x.com";
+	"-bit " SDL_STRING ")\nBuild date/time: " UPDATED_STR "\nCopyright 2011-" COPYRIGHT_END_YEAR " The DOSBox-X Team\nProject maintainer: joncampbell123\nDOSBox-X homepage: https://dosbox-x.com";
 
 void RebootConfig(std::string filename, bool confirm=false) {
     std::string exepath=GetDOSBoxXPath(true), para="-conf \""+filename+"\"";
@@ -242,9 +245,12 @@ static GUI::ScreenSDL *UI_Startup(GUI::ScreenSDL *screen) {
     GFX_LosingFocus();//Release any keys pressed (buffer gets filled again). (could be in above if, but clearing the mapper input when exiting the mapper is sensible as well
     SDL_Delay(20);
 
+    unsigned int cpbak = dos.loaded_codepage;
+    if (dos_kernel_disabled&&maincp) dos.loaded_codepage = maincp;
     Section_prop *section = static_cast<Section_prop *>(control->GetSection("dosbox"));
     LoadMessageFile(section->Get_string("language"));
     if (font_14_init) GUI_LoadFonts();
+    dos.loaded_codepage = cpbak;
 
     // Comparable to the code of intro.com, but not the same! (the code of intro.com is called from within a com file)
     shell_idle = !dos_kernel_disabled && strcmp(RunningProgram, "LOADLIN") && first_shell && (DOS_PSP(dos.psp()).GetSegment() == DOS_PSP(dos.psp()).GetParent());
@@ -278,7 +284,7 @@ static GUI::ScreenSDL *UI_Startup(GUI::ScreenSDL *screen) {
 
     if (dw < 640) dw = 640;
     if (dh < 350) dh = 350;
-    scalex = dw / 640; /* maximum horisontal scale */
+    scalex = dw / 640; /* maximum horizontal scale */
     scaley = dh / 350; /* maximum vertical   scale */
     if( scalex > scaley ) scale = scaley;
     else                  scale = scalex;
@@ -471,7 +477,7 @@ static GUI::ScreenSDL *UI_Startup(GUI::ScreenSDL *screen) {
             DOSBoxMenu::item &item = guiMenu.get_item("ExitGUI");
             item.set_text(MSG_Get("CONFIG_TOOL_EXIT"));
         }
-# if DOSBOXMENU_TYPE == DOSBOXMENU_HMENU
+# if DOSBOXMENU_TYPE == DOSBOXMENU_HMENU || DOSBOXMENU_TYPE == DOSBOXMENU_NSMENU
         if (loadlang) guiMenu.unbuild();
 # endif
     }
@@ -685,7 +691,7 @@ protected:
     Property *prop;
 public:
     PropertyEditor(Window *parent, int x, int y, Section_prop *section, Property *prop, bool opts) :
-        Window(parent, x, y, 500, 25), section(section), prop(prop) { }
+        Window(parent, x, y, 500, 25), section(section), prop(prop) { (void)opts; }
 
     virtual bool prepare(std::string &buffer) = 0;
 
@@ -824,7 +830,6 @@ protected:
 public:
     PropertyEditorString(Window *parent, int x, int y, Section_prop *section, Property *prop, bool opts) :
         PropertyEditor(parent, x, y, section, prop, opts) {
-        label = new GUI::Label(this, 0, 5, prop->propname);
         std::string title(section->GetName());
         if (title=="4dos"&&!strcmp(prop->propname.c_str(), "rem"))
             input = new GUI::Input(this, 30, 0, 470);
@@ -837,6 +842,26 @@ public:
         }
         std::string temps = prop->GetValue().ToString();
         input->setText(stringify(temps));
+        label = new GUI::Label(this, 0, 5, prop->propname);
+	scan_tabbing = true;
+
+        /* first child is first tabbable */
+        {
+            Window *w = this->getChild(0);
+            if (w) w->first_tabbable = true;
+        }
+
+        /* last child is first tabbable */
+        {
+            Window *w = this->getChild(this->getChildCount()-1);
+            if (w) w->last_tabbable = true;
+        }
+
+        /* the FIRST field needs to come first when tabbed to */
+        {
+            Window *w = this->getChild(0);
+            if (w) w->raise(); /* NTS: This CHANGES the child element order, getChild(0) will return something else */
+        }
     }
 
     void actionExecuted(GUI::ActionEventSource *b, const GUI::String &arg) {
@@ -867,13 +892,32 @@ protected:
 public:
     PropertyEditorFloat(Window *parent, int x, int y, Section_prop *section, Property *prop, bool opts) :
         PropertyEditor(parent, x, y, section, prop, opts) {
-        label = new GUI::Label(this, 0, 5, prop->propname);
         input = new GUI::Input(this, 380, 0, opts?90:120);
         if (opts) {
             infoButton=new GUI::Button(this, 470, 0, "...", 30, 24);
             infoButton->addActionHandler(this);
         }
         input->setText(stringify((double)prop->GetValue()));
+        label = new GUI::Label(this, 0, 5, prop->propname);
+	scan_tabbing = true;
+
+        /* first child is first tabbable */
+        {
+            Window *w = this->getChild(0);
+            if (w) w->first_tabbable = true;
+        }
+
+        /* last child is first tabbable */
+        {
+            Window *w = this->getChild(this->getChildCount()-1);
+            if (w) w->last_tabbable = true;
+        }
+
+        /* the FIRST field needs to come first when tabbed to */
+        {
+            Window *w = this->getChild(0);
+            if (w) w->raise(); /* NTS: This CHANGES the child element order, getChild(0) will return something else */
+        }
     }
 
     void actionExecuted(GUI::ActionEventSource *b, const GUI::String &arg) {
@@ -905,7 +949,6 @@ protected:
 public:
     PropertyEditorHex(Window *parent, int x, int y, Section_prop *section, Property *prop, bool opts) :
         PropertyEditor(parent, x, y, section, prop, opts) {
-        label = new GUI::Label(this, 0, 5, prop->propname);
         input = new GUI::Input(this, 380, 0, opts?90:120);
         if (opts) {
             infoButton=new GUI::Button(this, 470, 0, "...", 30, 24);
@@ -913,6 +956,26 @@ public:
         }
         std::string temps = prop->GetValue().ToString();
         input->setText(temps.c_str());
+        label = new GUI::Label(this, 0, 5, prop->propname);
+	scan_tabbing = true;
+
+        /* first child is first tabbable */
+        {
+            Window *w = this->getChild(0);
+            if (w) w->first_tabbable = true;
+        }
+
+        /* last child is first tabbable */
+        {
+            Window *w = this->getChild(this->getChildCount()-1);
+            if (w) w->last_tabbable = true;
+        }
+
+        /* the FIRST field needs to come first when tabbed to */
+        {
+            Window *w = this->getChild(0);
+            if (w) w->raise(); /* NTS: This CHANGES the child element order, getChild(0) will return something else */
+        }
     }
 
     void actionExecuted(GUI::ActionEventSource *b, const GUI::String &arg) {
@@ -944,7 +1007,6 @@ protected:
 public:
     PropertyEditorInt(Window *parent, int x, int y, Section_prop *section, Property *prop, bool opts) :
         PropertyEditor(parent, x, y, section, prop, opts) {
-        label = new GUI::Label(this, 0, 5, prop->propname);
         input = new GUI::Input(this, 380, 0, opts?90:120);
         if (opts) {
             infoButton=new GUI::Button(this, 470, 0, "...", 30, 24);
@@ -952,6 +1014,26 @@ public:
         }
         //Maybe use ToString() of Value
         input->setText(stringify(static_cast<int>(prop->GetValue())));
+        label = new GUI::Label(this, 0, 5, prop->propname);
+	scan_tabbing = true;
+
+        /* first child is first tabbable */
+        {
+            Window *w = this->getChild(0);
+            if (w) w->first_tabbable = true;
+        }
+
+        /* last child is first tabbable */
+        {
+            Window *w = this->getChild(this->getChildCount()-1);
+            if (w) w->last_tabbable = true;
+        }
+
+        /* the FIRST field needs to come first when tabbed to */
+        {
+            Window *w = this->getChild(0);
+            if (w) w->raise(); /* NTS: This CHANGES the child element order, getChild(0) will return something else */
+        }
     };
 
     void actionExecuted(GUI::ActionEventSource *b, const GUI::String &arg) {
@@ -1262,6 +1344,7 @@ public:
             name += "_CONFIGFILE_HELP";
             setText(MSG_Get(name.c_str()));
         }
+        wiw->raise(); /* focus on the message, not the close button, so the user can immediately arrow up/down */
         move(parent->getWidth()>this->getWidth()?(parent->getWidth()-this->getWidth())/2:0,parent->getHeight()>this->getHeight()?(parent->getHeight()-this->getHeight())/2:0);
     };
 
@@ -1335,10 +1418,6 @@ public:
         GUI::Button *b = new GUI::Button(this, button_row_cx, button_row_y, mainMenu.get_item("HelpMenu").get_text().c_str(), button_w);
         b->addActionHandler(this);
 
-        b = new GUI::Button(this, button_row_cx + (button_w + button_pad_w)*2, button_row_y, MSG_Get("CANCEL"), button_w);
-        b->addActionHandler(this);
-        closeButton = b;
-
         b = new GUI::Button(this, button_row_cx + (button_w + button_pad_w), button_row_y, MSG_Get("OK"), button_w);
 
         int i = 0, j = 0;
@@ -1368,6 +1447,11 @@ public:
             j++;
         }
         b->addActionHandler(this);
+
+        b = new GUI::Button(this, button_row_cx + (button_w + button_pad_w)*2, button_row_y, MSG_Get("CANCEL"), button_w);
+        b->addActionHandler(this);
+	scan_tabbing = true;
+        closeButton = b;
 
         /* first child is first tabbable */
         {
@@ -1562,10 +1646,6 @@ public:
         b = new GUI::Button(this, button_row_cx + button_w + (button_w + button_pad_w), button_row_y, mainMenu.get_item("HelpMenu").get_text().c_str(), button_w);
         b->addActionHandler(this);
 
-        b = new GUI::Button(this, button_row_cx + button_w + (button_w + button_pad_w)*3, button_row_y, MSG_Get("CANCEL"), button_w);
-        b->addActionHandler(this);
-        closeButton = b;
-
         b = new GUI::Button(this, button_row_cx + button_w + (button_w + button_pad_w)*2, button_row_y, MSG_Get("OK"), button_w);
 
         int i = 0;
@@ -1593,6 +1673,11 @@ public:
             i++;
         }
         b->addActionHandler(this);
+
+        b = new GUI::Button(this, button_row_cx + button_w + (button_w + button_pad_w)*3, button_row_y, MSG_Get("CANCEL"), button_w);
+        b->addActionHandler(this);
+	scan_tabbing = true;
+        closeButton = b;
 
         /* first child is first tabbable */
         {
@@ -2153,6 +2238,9 @@ public:
         (new GUI::Button(this, 100, 60, MSG_Get("OK"), 90))->addActionHandler(this);
         (new GUI::Button(this, 200, 60, MSG_Get("CANCEL"), 90))->addActionHandler(this);
         move(parent->getWidth()>this->getWidth()?(parent->getWidth()-this->getWidth())/2:0,parent->getHeight()>this->getHeight()?(parent->getHeight()-this->getHeight())/2:0);
+
+        name->raise(); /* make sure keyboard focus is on the text field, ready for the user */
+        name->posToEnd(); /* position the cursor at the end where the user is most likely going to edit */
     }
 
     void actionExecuted(GUI::ActionEventSource *b, const GUI::String &arg) {
@@ -2160,12 +2248,11 @@ public:
         Section_prop * sec = static_cast<Section_prop *>(control->GetSection("vsync"));
         if (arg == MSG_Get("OK")) {
             if (sec) {
-                const char* well = name->getText();
-                std::string s(well, 20);
+                std::string s((const char *)name->getText());
+                if (s.size()>20) s=s.substr(0,20);
                 std::string tmp("vsyncrate=");
                 tmp.append(s);
                 sec->HandleInputline(tmp);
-                delete well;
             }
         }
         if (sec) LOG_MSG("GUI: Current Vertical Sync Rate: %s Hz", sec->Get_string("vsyncrate"));
@@ -2190,6 +2277,9 @@ public:
             (new GUI::Button(this, 100, 70, MSG_Get("OK"), 90))->addActionHandler(this);
             (new GUI::Button(this, 200, 70, MSG_Get("CANCEL"), 90))->addActionHandler(this);
             move(parent->getWidth()>this->getWidth()?(parent->getWidth()-this->getWidth())/2:0,parent->getHeight()>this->getHeight()?(parent->getHeight()-this->getHeight())/2:0);
+
+            name->raise(); /* make sure keyboard focus is on the text field, ready for the user */
+            name->posToEnd(); /* position the cursor at the end where the user is most likely going to edit */
     }
 
     void actionExecuted(GUI::ActionEventSource *b, const GUI::String &arg) {
@@ -2226,6 +2316,9 @@ public:
             (new GUI::Button(this, 100, 70, MSG_Get("OK"), 90))->addActionHandler(this);
             (new GUI::Button(this, 200, 70, MSG_Get("CANCEL"), 90))->addActionHandler(this);
             move(parent->getWidth()>this->getWidth()?(parent->getWidth()-this->getWidth())/2:0,parent->getHeight()>this->getHeight()?(parent->getHeight()-this->getHeight())/2:0);
+
+            name->raise(); /* make sure keyboard focus is on the text field, ready for the user */
+            name->posToEnd(); /* position the cursor at the end where the user is most likely going to edit */
     }
 
     void actionExecuted(GUI::ActionEventSource *b, const GUI::String &arg) {
@@ -2245,7 +2338,7 @@ protected:
 public:
     SetAspectRatio(GUI::Screen *parent, int x, int y, const char *title) :
         ToplevelWindow(parent, x, y, 410, 140, title) {
-            new GUI::Label(this, 5, 10, "Enter aspect ratio:");
+            new GUI::Label(this, 5, 10, "Enter aspect ratio (w:h, -1:-1 = original ratio):");
             name = new GUI::Input(this, 5, 30, 390);
             char buffer[8];
             sprintf(buffer, "%d:%d", aspect_ratio_x,aspect_ratio_y);
@@ -2253,6 +2346,9 @@ public:
             (new GUI::Button(this, 100, 70, MSG_Get("OK"), 90))->addActionHandler(this);
             (new GUI::Button(this, 200, 70, MSG_Get("CANCEL"), 90))->addActionHandler(this);
             move(parent->getWidth()>this->getWidth()?(parent->getWidth()-this->getWidth())/2:0,parent->getHeight()>this->getHeight()?(parent->getHeight()-this->getHeight())/2:0);
+
+            name->raise(); /* make sure keyboard focus is on the text field, ready for the user */
+            name->posToEnd(); /* position the cursor at the end where the user is most likely going to edit */
     }
 
     void actionExecuted(GUI::ActionEventSource *b, const GUI::String &arg) {
@@ -2261,6 +2357,82 @@ public:
             SetVal("render", "aspect_ratio", name->getText());
             setAspectRatio(static_cast<Section_prop *>(control->GetSection("render")));
             //if (render.aspect) GFX_ForceRedrawScreen();
+        }
+        close();
+        if (shortcut) running = false;
+    }
+};
+
+extern std::string dosbox_title;
+class SetTitleText : public GUI::ToplevelWindow {
+protected:
+    GUI::Input *title1, *title2;
+    Section_prop *sec1, *sec2;
+    std::string t1, t2;
+public:
+    SetTitleText(GUI::Screen *parent, int x, int y, const char *title) :
+        ToplevelWindow(parent, x, y, 410, 180, title) {
+            sec1 = static_cast<Section_prop *>(control->GetSection("dosbox"));
+            sec2 = static_cast<Section_prop *>(control->GetSection("sdl"));
+            t1 = sec1->Get_string("title");
+            t2 = sec2->Get_string("titlebar");
+            trim(t1);
+            trim(t2);
+            new GUI::Label(this, 5, 10, "Prepend text in title bar:");
+            title1 = new GUI::Input(this, 5, 30, 390);
+            title1->setText(t1);
+            new GUI::Label(this, 5, 60, "Append text in title bar:");
+            title2 = new GUI::Input(this, 5, 80, 390);
+            title2->setText(t2);
+            (new GUI::Button(this, 100, 110, MSG_Get("OK"), 90))->addActionHandler(this);
+            (new GUI::Button(this, 200, 110, MSG_Get("CANCEL"), 90))->addActionHandler(this);
+            move(parent->getWidth()>this->getWidth()?(parent->getWidth()-this->getWidth())/2:0,parent->getHeight()>this->getHeight()?(parent->getHeight()-this->getHeight())/2:0);
+
+            title1->raise(); /* make sure keyboard focus is on the text field, ready for the user */
+            title1->posToEnd(); /* position the cursor at the end where the user is most likely going to edit */
+    }
+
+    void actionExecuted(GUI::ActionEventSource *b, const GUI::String &arg) {
+        (void)b;//UNUSED
+        if (arg == MSG_Get("OK")) {
+            dosbox_title = trim(title1->getText());
+            SetVal("dosbox", "title", dosbox_title);
+            SetVal("sdl", "titlebar", trim(title2->getText()));
+            GFX_SetTitle(-1,-1,-1,false);
+        }
+        close();
+        if (shortcut) running = false;
+    }
+};
+
+class SetTransparency : public GUI::ToplevelWindow {
+protected:
+    GUI::Input *name;
+	Section_prop * sec;
+public:
+    SetTransparency(GUI::Screen *parent, int x, int y, const char *title) :
+        ToplevelWindow(parent, x, y, 410, 140, title) {
+			sec = static_cast<Section_prop *>(control->GetSection("sdl"));
+            new GUI::Label(this, 5, 10, "Enter transparency (0-90; from low to high):");
+            name = new GUI::Input(this, 5, 30, 390);
+			std::ostringstream str;
+			str << sec->Get_int("transparency");
+			std::string transtr=str.str();
+            name->setText(transtr.c_str());
+            (new GUI::Button(this, 100, 70, MSG_Get("OK"), 90))->addActionHandler(this);
+            (new GUI::Button(this, 200, 70, MSG_Get("CANCEL"), 90))->addActionHandler(this);
+            move(parent->getWidth()>this->getWidth()?(parent->getWidth()-this->getWidth())/2:0,parent->getHeight()>this->getHeight()?(parent->getHeight()-this->getHeight())/2:0);
+
+            name->raise(); /* make sure keyboard focus is on the text field, ready for the user */
+            name->posToEnd(); /* position the cursor at the end where the user is most likely going to edit */
+    }
+
+    void actionExecuted(GUI::ActionEventSource *b, const GUI::String &arg) {
+        (void)b;//UNUSED
+        if (arg == MSG_Get("OK")) {
+            SetVal("sdl", "transparency", name->getText());
+			sec = static_cast<Section_prop *>(control->GetSection("sdl"));
+            SetWindowTransparency(sec->Get_int("transparency"));
         }
         close();
         if (shortcut) running = false;
@@ -2361,7 +2533,7 @@ public:
     ShowDriveInfo(GUI::Screen *parent, int x, int y, const char *title) :
         ToplevelWindow(parent, x, y, 400, 280, title) {
             char name[DOS_NAMELENGTH_ASCII],lname[LFN_NAMELENGTH];
-            uint32_t size;uint16_t date;uint16_t time;uint8_t attr;
+            uint32_t size,hsize;uint16_t date;uint16_t time;uint8_t attr;
             /* Command uses dta so set it to our internal dta */
             RealPt save_dta = dos.dta();
             dos.dta(dos.tables.tempdta);
@@ -2370,7 +2542,7 @@ public:
                 char root[7] = {(char)('A'+statusdrive),':','\\','*','.','*',0};
                 bool ret = DOS_FindFirst(root,DOS_ATTR_VOLUME);
                 if (ret) {
-                    dta.GetResult(name,lname,size,date,time,attr);
+                    dta.GetResult(name,lname,size,hsize,date,time,attr);
                     DOS_FindNext(); //Mark entry as invalid
                 } else name[0] = 0;
 
@@ -2766,10 +2938,10 @@ public:
                 char const * lTheSaveFileName = tinyfd_saveFileDialog("Select a disk image file","IMGMAKE.IMG",2,lFilterPatterns,lFilterDescription);
 #endif
                 if (lTheSaveFileName!=NULL) {
-                    temp="-force -t "+temp+" "+std::string(lTheSaveFileName);
+                    temp="-force -t "+temp+" \""+std::string(lTheSaveFileName)+"\"";
                     void runImgmake(const char *str);
                     runImgmake(temp.c_str());
-                    if (!dos_kernel_disabled) {
+                    if (!dos_kernel_disabled && strcmp(RunningProgram, "LOADLIN")) {
                         DOS_Shell shell;
                         shell.ShowPrompt();
                     }
@@ -2792,7 +2964,7 @@ protected:
     GUI::Input *name;
 public:
     ShowHelpIntro(GUI::Screen *parent, int x, int y, const char *title) :
-        ToplevelWindow(parent, x, y, 580, 190, title) {
+        ToplevelWindow(parent, x, y, 610, 190, title) {
             std::istringstream in(MSG_Get("INTRO_MESSAGE"));
             int r=0;
             if (in)	for (std::string line; std::getline(in, line); ) {
@@ -2888,7 +3060,7 @@ public:
 };
 
 extern std::string helpcmd;
-char *str_replace(char *orig, char *rep, char *with);
+char *str_replace(const char *orig, const char *rep, const char *with);
 class ShowHelpCommand : public GUI::ToplevelWindow {
 protected:
     GUI::Input *name;
@@ -2902,7 +3074,7 @@ public:
             else if (helpcmd=="RD") helpcmd="RMDIR";
             else if (helpcmd=="REN") helpcmd="RENAME";
             std::string helpinfo=std::string(MSG_Get(("SHELL_CMD_"+helpcmd+"_HELP").c_str()))+"\n"+std::string(MSG_Get(("SHELL_CMD_"+helpcmd+"_HELP_LONG").c_str()));
-            std::istringstream in(str_replace(str_replace(str_replace(str_replace((char *)helpinfo.c_str(), (char*)"%%", (char*)"%"), (char*)"\033[0m", (char*)""), (char*)"\033[33;1m", (char*)""), (char*)"\033[37;1m", (char*)""));
+            std::istringstream in(str_replace(str_replace(str_replace(str_replace(helpinfo.c_str(), "%%", "%"), "\033[0m", ""), "\033[33;1m", ""), "\033[37;1m", ""));
             int r=0;
             if (in)	for (std::string line; std::getline(in, line); ) {
                 r+=25;
@@ -2941,7 +3113,7 @@ public:
         bar->addItem(2,MSG_Get("VISIT_HOMEPAGE"));
         bar->addItem(2,"");
         if (!dos_kernel_disabled) {
-            /* these do not work until shell help text is registerd */
+            /* these do not work until shell help text is registered */
             bar->addItem(2,MSG_Get("GET_STARTED"));
             bar->addItem(2,MSG_Get("CDROM_SUPPORT"));
             bar->addItem(2,"");
@@ -3069,7 +3241,7 @@ public:
             new GUI::MessageBox2(getScreen(), getScreen()->getWidth()>350?(parent->getWidth()-350)/2:0, 150, 350, mainMenu.get_item("help_about").get_text().c_str(), aboutmsg);
         } else if (arg == MSG_Get("INTRODUCTION")) {
             //new GUI::MessageBox2(getScreen(), 20, 50, 540, "Introduction", intromsg);
-            new GUI::MessageBox2(getScreen(), getScreen()->getWidth()>540?(parent->getWidth()-540)/2:0, 50, 540, mainMenu.get_item("help_intro").get_text().c_str(), MSG_Get("INTRO_MESSAGE"));
+            new GUI::MessageBox2(getScreen(), getScreen()->getWidth()>540?(parent->getWidth()-540)/2:0, 150, 540, mainMenu.get_item("help_intro").get_text().c_str(), MSG_Get("INTRO_MESSAGE"));
         } else if (arg == MSG_Get("GET_STARTED")) {
             std::string msg = MSG_Get("PROGRAM_INTRO_MOUNT_START");
 #ifdef WIN32
@@ -3273,19 +3445,17 @@ static void UI_Select(GUI::ScreenSDL *screen, int select) {
             np4->raise();
             } break;
         case 20: {
-            auto *np4 = new SetAspectRatio(screen, 90, 100, "Set aspect ratio...");
-            np4->raise();
+            auto *np5 = new SetAspectRatio(screen, 90, 100, "Set aspect ratio...");
+            np5->raise();
             } break;
-#if C_DEBUG
         case 21: {
-            npwin = new LogWindow(screen, 70, 70);
-            npwin->raise();
+            auto *np6 = new SetTitleText(screen, 90, 130, mainMenu.get_item("set_titletext").get_text().c_str());
+            np6->raise();
             } break;
         case 22: {
-            npwin = new CodeWindow(screen, 70, 70);
-            npwin->raise();
+            auto *np6 = new SetTransparency(screen, 90, 100, mainMenu.get_item("set_transparency").get_text().c_str());
+            np6->raise();
             } break;
-#endif
         case 23: {
             auto *np7 = new ShowLoadWarning(screen, 150, 120, "DOSBox-X version mismatch. Load the state anyway?");
             np7->raise();
@@ -3315,7 +3485,7 @@ static void UI_Select(GUI::ScreenSDL *screen, int select) {
             np7->raise();
             } break;
         case 30: {
-            auto *np7 = new SetRefreshRate(screen, 0, 0, "Set video refresh rate...");
+            auto *np7 = new SetRefreshRate(screen, 0, 0, mainMenu.get_item("refresh_rate").get_text().c_str());
             np7->raise();
             } break;
         case 31: if (statusdrive>-1 && statusdrive<DOS_DRIVES && Drives[statusdrive]) {
@@ -3355,17 +3525,27 @@ static void UI_Select(GUI::ScreenSDL *screen, int select) {
             np15->raise();
             } break;
         case 40: {
-            auto *np5 = new ShowMixerInfo(screen, 90, 70, MSG_Get("CURRENT_VOLUME"));
-            np5->raise();
+            auto *np16 = new ShowMixerInfo(screen, 90, 70, MSG_Get("CURRENT_VOLUME"));
+            np16->raise();
             } break;
         case 41: {
-            auto *np6 = new ShowSBInfo(screen, 150, 100, MSG_Get("CURRENT_SBCONFIG"));
-            np6->raise();
+            auto *np16 = new ShowSBInfo(screen, 150, 100, MSG_Get("CURRENT_SBCONFIG"));
+            np16->raise();
             } break;
         case 42: {
-            auto *np6 = new ShowMidiDevice(screen, 150, 100, MSG_Get("CURRENT_MIDICONFIG"));
-            np6->raise();
+            auto *np16 = new ShowMidiDevice(screen, 150, 100, MSG_Get("CURRENT_MIDICONFIG"));
+            np16->raise();
             } break;
+#if C_DEBUG
+        case 43: {
+            npwin = new LogWindow(screen, 70, 70);
+            npwin->raise();
+            } break;
+        case 44: {
+            npwin = new CodeWindow(screen, 70, 70);
+            npwin->raise();
+            } break;
+#endif
         default:
             break;
     }
@@ -3424,6 +3604,7 @@ static void UI_Select(GUI::ScreenSDL *screen, int select) {
 int sel = -1;
 bool switchttf = false, gofs = false;
 void RunCfgTool(Bitu val) {
+    (void)val;//unused
     gofs=false;
 #if defined(USE_TTF)
     if (!ttf.inUse && switchttf) {
@@ -3475,7 +3656,7 @@ void GUI_Shortcut(int select) {
         PIC_AddEvent(RunCfgTool, 100);
     } else
 #endif
-    RunCfgTool(NULL);
+    RunCfgTool(0);
 }
 
 void GUI_Run(bool pressed) {
@@ -3490,5 +3671,5 @@ void GUI_Run(bool pressed) {
         PIC_AddEvent(RunCfgTool, 100);
     } else
 #endif
-    RunCfgTool(NULL);
+    RunCfgTool(0);
 }

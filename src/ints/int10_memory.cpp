@@ -43,7 +43,7 @@ static uint8_t static_functionality[0x10]=
  /* 7 */ 0x07,  // 200, 350, 400 scan lines
  /* 8 */ 0x04,  // total number of character blocks available in text modes
  /* 9 */ 0x02,  // maximum number of active character blocks in text modes
- /* a */ 0xff,  // Misc Flags Everthing supported 
+ /* a */ 0xff,  // Misc Flags Everything supported 
  /* b */ 0x0e,  // Support for Display combination, intensity/blinking and video state saving/restoring
  /* c */ 0x00,  // reserved
  /* d */ 0x00,  // reserved
@@ -189,6 +189,7 @@ void INT10_RemoveVGABIOS(void) { /* PC-98 does not have VGA BIOS */
 }
 
 RealPt GetSystemBiosINT10Vector(void);
+Bitu ROMBIOS_GetMemory(Bitu bytes,const char *who,Bitu alignment,Bitu must_be_at);
 
 extern bool VGA_BIOS_use_rom;
 
@@ -201,17 +202,24 @@ void INT10_SetupRomMemory(void) {
 		int10.rom.font_14=0;
 		int10.rom.font_16=0;
 
-        /* ref: [http://www.ctyme.com/intr/rb-6173.htm] */
-        if (IS_TANDY_ARCH)
-            RealSetVec(0x44,int10.rom.font_8_first);
-        else
-            RealSetVec(0x43,int10.rom.font_8_first);
+		/* ref: [http://www.ctyme.com/intr/rb-6173.htm] */
+		if (IS_TANDY_ARCH)
+			RealSetVec(0x44,int10.rom.font_8_first);
+		else
+			RealSetVec(0x43,int10.rom.font_8_first);
+
+		if (IS_EGAVGA_ARCH || VIDEO_BIOS_enable_CGA_8x8_second_half) {
+			Bitu rom = ROMBIOS_GetMemory((8*128),"CGA 8x8 second half",1,0u);
+			if (rom == 0) E_Exit("Unable to alloc CGA 8x8 second half");
+			int10.rom.font_8_second = RealMake((unsigned int)rom >> 4u,(unsigned int)rom & 0xFu);
+			for (unsigned i=0;i<128*8;i++) {
+				phys_writeb(rom+i,int10_font_08[i+128*8]);
+			}
+		}
 
 		RealSetVec(0x1F,int10.rom.font_8_second);
 
         if (machine == MCH_MCGA) {
-            Bitu ROMBIOS_GetMemory(Bitu bytes,const char *who,Bitu alignment,Bitu must_be_at);
-
             Bitu base = ROMBIOS_GetMemory((Bitu)(256*16),"MCGA 16-line font",1,0u);
             if (base == 0) E_Exit("Unable to alloc MCGA 16x font");
 
@@ -261,58 +269,106 @@ void INT10_SetupRomMemory(void) {
 	if (IS_EGAVGA_ARCH) {
 		// set up the start of the ROM
 
-        // we must make valid boot code at seg:3. return value is callback index
-        if (VGA_ROM_BIOS_ENTRY_cb == 0) {
-            VGA_ROM_BIOS_ENTRY_cb = CALLBACK_Allocate();
-            CALLBACK_Setup(VGA_ROM_BIOS_ENTRY_cb,VGA_ROM_BIOS_ENTRY_callback_func,CB_RETF,"VGA ROM BIOS boot up entry point");
-        }
+		// we must make valid boot code at seg:3. return value is callback index
+		if (VGA_ROM_BIOS_ENTRY_cb == 0) {
+			VGA_ROM_BIOS_ENTRY_cb = CALLBACK_Allocate();
+			CALLBACK_Setup(VGA_ROM_BIOS_ENTRY_cb,VGA_ROM_BIOS_ENTRY_callback_func,CB_RETF,"VGA ROM BIOS boot up entry point");
+		}
 
-        // ROM signature
+		// ROM signature
 		phys_writew(rom_base+0,0xaa55);
 		phys_writeb(rom_base+2,(uint8_t)(VGA_BIOS_Size >> 9u));
-        // entry point
-        phys_writeb(rom_base+3,0xFE); // Callback instruction
-        phys_writeb(rom_base+4,0x38);
-        phys_writew(rom_base+5,(uint16_t)VGA_ROM_BIOS_ENTRY_cb);
-        phys_writeb(rom_base+7,0xCB); // RETF
+		// entry point
+		phys_writeb(rom_base+3,0xFE); // Callback instruction
+		phys_writeb(rom_base+4,0x38);
+		phys_writew(rom_base+5,(uint16_t)VGA_ROM_BIOS_ENTRY_cb);
+		phys_writeb(rom_base+7,0xCB); // RETF
 
-        // VGA BIOS copyright
-		if (IS_VGA_ARCH) phys_writes(rom_base+0x1e, "IBM compatible VGA BIOS", 24);
-		else phys_writes(rom_base+0x1e, "IBM compatible EGA BIOS", 24);
+		// VGA BIOS copyright
+		if (IS_VGA_ARCH) {
+			if (svgaCard == SVGA_ATI)
+				phys_writes(rom_base+0x1e, "IBM", 4/*length of string+NUL*/);
+			else
+				phys_writes(rom_base+0x1e, "IBM compatible VGA BIOS", 24/*length of string+NUL*/);
+		}
+		else {
+			phys_writes(rom_base+0x1e, "IBM compatible EGA BIOS", 24);
+		}
 
 		if (IS_VGA_ARCH) {
 			// SVGA card-specific ROM signatures
 			switch (svgaCard) {
-			case SVGA_S3Trio:
-                if(!VGA_BIOS_use_rom) {
-                    // S3 ROM signature
-                    phys_writes(rom_base+0x003f, "S3 86C764", 10);
-                }
-				break;
-			case SVGA_TsengET4K:
-			case SVGA_TsengET3K:
-                if(!VGA_BIOS_use_rom) {
-                    // Tseng ROM signature
-                    phys_writes(rom_base+0x0075, " Tseng ", 8);
-                }
-				break;
-			case SVGA_ParadisePVGA1A:
-				phys_writeb(rom_base+0x0048,' ');
-				phys_writeb(rom_base+0x0049,'W');
-				phys_writeb(rom_base+0x004a,'E');
-				phys_writeb(rom_base+0x004b,'S');
-				phys_writeb(rom_base+0x004c,'T');
-				phys_writeb(rom_base+0x004d,'E');
-				phys_writeb(rom_base+0x004e,'R');
-				phys_writeb(rom_base+0x004f,'N');
-				phys_writeb(rom_base+0x0050,' ');
-				phys_writeb(rom_base+0x007d,'V');
-				phys_writeb(rom_base+0x007e,'G');
-				phys_writeb(rom_base+0x007f,'A');
-				phys_writeb(rom_base+0x0080,'=');
-				break;
-			case SVGA_None:
-				break;
+				case SVGA_S3Trio:
+					if(!VGA_BIOS_use_rom) {
+						// S3 ROM signature
+						phys_writes(rom_base+0x003f, "S3 86C764", 10);
+					}
+					break;
+				case SVGA_TsengET4K:
+				case SVGA_TsengET3K:
+					if(!VGA_BIOS_use_rom) {
+						// Tseng ROM signature
+						phys_writes(rom_base+0x0075, " Tseng ", 8);
+					}
+					break;
+				case SVGA_ParadisePVGA1A:
+					phys_writeb(rom_base+0x0048,' ');
+					phys_writeb(rom_base+0x0049,'W');
+					phys_writeb(rom_base+0x004a,'E');
+					phys_writeb(rom_base+0x004b,'S');
+					phys_writeb(rom_base+0x004c,'T');
+					phys_writeb(rom_base+0x004d,'E');
+					phys_writeb(rom_base+0x004e,'R');
+					phys_writeb(rom_base+0x004f,'N');
+					phys_writeb(rom_base+0x0050,' ');
+					phys_writeb(rom_base+0x007d,'V');
+					phys_writeb(rom_base+0x007e,'G');
+					phys_writeb(rom_base+0x007f,'A');
+					phys_writeb(rom_base+0x0080,'=');
+					break;
+				case SVGA_ATI:
+					/* Visit the PCem project and browse their ROM collection, examine the ATI BIOS images and
+					 * notice they only put "IBM" up there. See also this ATI VGA Wonder XL VGA ROM BIOS image
+					 * here: [https://archive.org/details/ati_vgawonder_xl_rom]
+					 *
+					 * See also this documentation: [http://hackipedia.org/browse.cgi/Computer/Platform/PC%2c%20IBM%20compatible/Video/VGA/SVGA/ATI%2c%20Array%20Technology%20Inc/ATI%20Technologies%20Super%20VGA%20Chipsets%20%28WHATVGA%20v2%2e00%29%20%281995%2d09%2d29%29%2etxt]
+					 *
+					 * See also the WHATVGA.EXE source code (written in Pascal) */
+					/* FIXME: There is a "atimach64vt2pci.bin" image where the signature at 0x31 is "3?" instead of "31" and byte 0x43 is 0x40 instead of 0x20. Why? */
+					phys_writew(rom_base+0x10, 0x1CE); /*ATI extended registers I/O base port*/
+					phys_writes(rom_base+0x31, "761295520", 9/*length of string*/); /* ATI product ID */
+					phys_writes(rom_base+0x40, "31", 2/*length of string*/); /* ATI Wonder/Mach series */
+					switch (atiCard) {
+						case ATI_EGAVGAWonder: // ATI 18800 EGA/VGA Wonder
+							phys_writeb(rom_base+0x43,0x31); // NTS: the 18800-1 uses code 0x32 according to WHATVGA
+							break;
+						case ATI_VGAWonder: // ATI 28800-1 VGA Wonder
+							phys_writeb(rom_base+0x43,0x32); // NTS: 28800-2 is 0x33, what is 28800-1?
+							break;
+						case ATI_VGAWonderPlus: // ATI 28800-2 VGA Wonder+
+							phys_writeb(rom_base+0x43,0x33);
+							break;
+						case ATI_VGAWonderXL: // ATI 28800-4 VGA WonderXL
+							phys_writeb(rom_base+0x43,0x34);
+							break;
+						case ATI_VGAWonderXL24: // ATI 28800-6 VGA Wonder
+							phys_writeb(rom_base+0x43,0x35);
+							break;
+						case ATI_Mach8: // ATI 38800-1
+							phys_writeb(rom_base+0x43,0x38); // FIXME: GUESS because '8' might make sense for Mach8, I dunno
+							break;
+						case ATI_Mach32: // ATI 68800-3
+							phys_writeb(rom_base+0x43,0x61);
+							break;
+						case ATI_Mach64: // ATI 88800GX
+							phys_writeb(rom_base+0x43,0x20); // confirmed by PCem rom image mach64g/bios.bin
+							break;
+						default:
+							break;
+					};
+					break;
+				case SVGA_None:
+					break;
 			}
 		}
 

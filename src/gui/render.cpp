@@ -30,11 +30,17 @@
 #include "setup.h"
 #include "control.h"
 #include "mapper.h"
+#include "menudef.h"
+#include "vga.h"
+#include "pic.h"
 #include "cross.h"
 #include "hardware.h"
 #include "support.h"
 #include "sdlmain.h"
 #include "shell.h"
+#include "pc98_cg.h"
+#include "pc98_gdc.h"
+#include "pc98_gdc_const.h"
 
 #include "render_scalers.h"
 #include "render_glsl.h"
@@ -42,6 +48,11 @@
 #include <xmmintrin.h>
 #include <emmintrin.h>
 #endif
+
+#include <output/output_tools_xbrz.h>
+#include <output/output_opengl.h>
+
+extern bool video_debug_overlay;
 
 Render_t                                render;
 int                                     eurAscii = -1;
@@ -59,8 +70,9 @@ bool                                    systemmessagebox(char const * aTitle, ch
 
 #if defined(USE_TTF)
 bool resetreq=false;
-void resetFontSize();
+void resetFontSize(), drawmenu(Bitu val);
 #endif
+void SetWindowTransparency(int trans);
 
 static void Check_Palette(void) {
     /* Clean up any previous changed palette data */
@@ -376,9 +388,14 @@ void AspectRatio_mapper_shortcut(bool pressed) {
     }
 }
 
+void VGA_DebugOverlay();
+
 void RENDER_EndUpdate( bool abort ) {
     if (GCC_UNLIKELY(!render.updating))
         return;
+
+    if (video_debug_overlay && !abort && render.active)
+        VGA_DebugOverlay();
 
     if (!abort && render.active && RENDER_DrawLine == RENDER_ClearCacheHandler)
         render.scale.clearCache = false;
@@ -820,14 +837,24 @@ forcenormal:
     render.scale.outWrite = 0;
     /* Signal the next frame to first reinit the cache */
     render.scale.clearCache = true;
-    render.active=true;
+
+    if (!sdl.window_too_small)
+        render.active=true;
 
     last_gfx_flags = gfx_flags;
 #if defined(USE_TTF)
-    if (sdl.desktop.want_type == SCREEN_TTF && resetreq) resetFontSize();
+    if (sdl.desktop.want_type == SCREEN_TTF) {
+        if (resetreq) resetFontSize();
+#if defined(HX_DOS)
+        else PIC_AddEvent(drawmenu, 200);
+#endif
+    }
 #endif
     // Ensure VMware mouse support knows the current parameters
 	VMWARE_ScreenParams(sdl.clip.x, sdl.clip.y, sdl.clip.w, sdl.clip.h, sdl.desktop.fullscreen);
+#if defined(MACOSX) && !defined(C_SDL2)
+	SetWindowTransparency(-1);
+#endif
 }
 
 void RENDER_CallBack( GFX_CallBackFunctions_t function ) {
@@ -862,8 +889,9 @@ void RENDER_SetSize(Bitu width,Bitu height,Bitu bpp,float fps,double scrn_ratio)
     // figure out doublewidth/height values
     bool dblw = false;
     bool dblh = false;
+    bool do_not_dblh = (IS_VGA_ARCH && vga.draw.doublescan_set) || machine == MCH_MDA || machine == MCH_HERC;
     double ratio = (((double)width)/((double)height))/scrn_ratio;
-    if(ratio > 1.6) {
+    if(ratio > 1.6 && !do_not_dblh) {
         dblh=true;
         ratio /= 2.0;
     } else if(ratio < 0.75) {
@@ -873,6 +901,75 @@ void RENDER_SetSize(Bitu width,Bitu height,Bitu bpp,float fps,double scrn_ratio)
         dblw=true; dblh=true;
     }
     LOG_MSG("pixratio %1.3f, dw %s, dh %s",ratio,dblw?"true":"false",dblh?"true":"false");
+
+    /* this must be done after dblw/dblh so extra room can be added without screwing up the screen.
+     * debug information is drawn into the buffer pre-scaler to make sure that if the user wants it
+     * in still image or video capture, they can. */
+    if (video_debug_overlay) {
+	if (width < 320) width = 320;
+	height += 4;
+	if (machine == MCH_EGA) {
+		height += 8*3;
+		width += 4;
+		width += 16*2; /* palette */
+		width += 4;
+		width += 4*2; /* cpe */
+		width += 4;
+		width += 8*32;
+		width += 4;
+	}
+	else if (machine == MCH_MDA) {
+		height += 8*1;
+	}
+	else if (machine == MCH_HERC) {
+		if (hercCard >= HERC_InColor)
+			height += 8*2;
+		else
+			height += 8*1;
+	}
+	else if (machine == MCH_PC98) {
+		height += 8*6;
+		width += 4;
+		if (pc98_gdc_vramop & (1u << VOPBIT_VGA)) {
+			/* PC-98 games do not often use the 256-color mode, and if they do,
+			 * they do not do "copper" effects or per-scanline effects. */
+		}
+		else if (pc98_gdc_vramop & (1u << VOPBIT_ANALOG)) {
+			/* 16-color "analog". Though uncommon, there is at least one test
+			 * case I am aware of that does a per-scanline "copper" effect
+			 * in the title screen though it's more of a momentary flash of
+			 * light with a vertical gradient. */
+			width += 16*2;
+			width += 4;
+		}
+		else {
+			/* 8-color "digital". I can't think of any reason you'd want to
+			 * do "copper" effects when all you can do is map one 3-bit value
+			 * to another 3-bit value. It's like, what's the point? Woo. Well,
+			 * in case some game has a reason, show it. */
+			width += 8*2;
+			width += 4;
+		}
+		width += 8*32;
+		width += 4;
+	}
+	else if (machine == MCH_VGA) {
+		height += 8*7;
+		width += 4;
+		if (vga.mode == M_VGA || vga.mode == M_LIN8) {
+			width += 256;
+			width += 4;
+		}
+		width += 16; /* CSPAL */
+		width += 4;
+		width += 8*32;
+		width += 4;
+	}
+	else {
+		height += 8*2;
+	}
+	height += 4;
+    }
 
     if ( ratio > 1.0 ) {
         double target = height * ratio + 0.025;
@@ -1154,13 +1251,12 @@ std::string LoadGLShader(Section_prop * section) {
 	Prop_path *sh = section->Get_path("glshader");
 	std::string f = (std::string)sh->GetValue();
     ResolvePath(f);
-    const char *ssrc=shader_src.c_str();
 	if (f.empty() || f=="none" || f=="default") {
         render.shader_src = NULL;
         render.shader_def = f=="default";
         if (initgl==2) sdl_opengl.use_shader=true;
     } else if (!RENDER_GetShader(sh->realpath,(char *)shader_src.c_str())) {
-        std::string path = std::string("glshaders") + CROSS_FILESPLIT + f;
+        std::string path = std::string("glshaders") + CROSS_FILESPLIT + f, pathcfg, pathres;
         if (!RENDER_GetShader(path,(char *)shader_src.c_str())) {
             std::string exePath = GetDOSBoxXPath();
             if (exePath.size()) path = exePath + std::string("glshaders") + CROSS_FILESPLIT + f;
@@ -1172,8 +1268,10 @@ std::string LoadGLShader(Section_prop * section) {
         }
         if (path.size() && !RENDER_GetShader(path,(char *)shader_src.c_str())) {
             Cross::GetPlatformConfigDir(path);
-            path = path + "glshaders" + CROSS_FILESPLIT + f;
-            if (!RENDER_GetShader(path,(char *)shader_src.c_str()) && (sh->realpath==f || !RENDER_GetShader(f,(char *)shader_src.c_str()))) {
+            pathcfg = path + "glshaders" + CROSS_FILESPLIT + f;
+            Cross::GetPlatformResDir(path);
+            pathres = path + "glshaders" + CROSS_FILESPLIT + f;
+            if (!RENDER_GetShader(pathcfg,(char *)shader_src.c_str()) && !RENDER_GetShader(pathres,(char *)shader_src.c_str()) && (sh->realpath==f || !RENDER_GetShader(f,(char *)shader_src.c_str()))) {
                 sh->SetValue("none");
                 LOG_MSG("Shader file \"%s\" not found", f.c_str());
             } else {
@@ -1315,7 +1413,7 @@ void RENDER_Init() {
     render.forceUpdate=false;
     std::string cline;
     std::string scaler;
-    //Check for commandline paramters and parse them through the configclass so they get checked against allowed values
+    //Check for commandline parameters and parse them through the configclass so they get checked against allowed values
     if (control->cmdline->FindString("-scaler",cline,true)) {
         section->HandleInputline(std::string("scaler=") + cline);
     } else if (control->cmdline->FindString("-forcescaler",cline,true)) {
@@ -1323,9 +1421,6 @@ void RENDER_Init() {
     }
 
     RENDER_UpdateFromScalerSetting();
-
-    vga_alt_new_mode = control->opt_alt_vga_render || section->Get_bool("alt render");
-    if (vga_alt_new_mode) LOG_MSG("Alternative VGA render engine not yet fully implemented!");
 
     render.autofit=section->Get_bool("autofit");
 

@@ -1,6 +1,6 @@
 :DOSBOX-X:LANGUAGE:French (France)
-:DOSBOX-X:CODEPAGE:858
-:DOSBOX-X:VERSION:0.83.25
+:DOSBOX-X:CODEPAGE:859
+:DOSBOX-X:VERSION:2023.05.01
 :DOSBOX-X:REMARK:
 :AUTOEXEC_CONFIGFILE_HELP
 Les lignes de cette section seront exécutées au démarrage.
@@ -223,12 +223,6 @@ Emplacement vide
 .
 :SLOT
 Emplacement
-.
-:PREVIOUS_PAGE
-< Page préc.
-.
-:NEXT_PAGE
-Page suivante >
 .
 :SELECT_EVENT
 Sélectionnez un événement à modifier.
@@ -905,7 +899,7 @@ Les seules lettres de lecteur amorçables sont A, C et D. Pour le démarrage à 
 
 La syntaxe de cette commande est l'une des suivantes :
 
-←[34;1mBOOT [lettre du lecteur:]←[0m
+←[34;1mBOOT [lettre du lecteur:] [-convertfat|-convertfatro|-noconvertfat]←[0m
 
 ←[34;1mBOOT diskimg1.img [diskimg2.img ...] [-L lettre du lecteur]←[0m
 
@@ -1263,6 +1257,107 @@ Paramètre(s) invalide(s).
 Doit spécifier un numéro de port entre 1 et 9.
 
 .
+:PROGRAM_VHDMAKE_WRITERR
+Could not write to new VHD image "%s", aborting.
+
+.
+:PROGRAM_VHDMAKE_REMOVEERR
+Could not erase file "%s"
+
+.
+:PROGRAM_VHDMAKE_RENAME
+You'll have to manually rename the newly created VHD image.
+
+.
+:PROGRAM_VHDMAKE_SUCCESS
+New VHD image succesfully created. You can mount it with ←[34;1mIMGMOUNT←[0m.
+
+.
+:PROGRAM_VHDMAKE_ERROPEN
+Error, could not open image file "%s".
+
+.
+:PROGRAM_VHDMAKE_BADSIZE
+Bad VHD size specified, aborting!
+
+.
+:PROGRAM_VHDMAKE_FNEEDED
+A pre-existing VHD image can't be silently overwritten without -f option!
+
+.
+:PROGRAM_VHDMAKE_BADPARENT
+The parent VHD image "%s" can't be opened for linking, aborting!
+
+.
+:PROGRAM_VHDMAKE_NOINFO
+Couldn't query info for "%s".
+
+.
+:PROGRAM_VHDMAKE_BLOCKSTATS
+with %d/%d blocks allocated.
+
+.
+:PROGRAM_VHDMAKE_INFO
+VHD "%s" type is %s.
+Its virtual size is %.02f MB
+
+.
+:PROGRAM_VHDMAKE_CANTMERGE
+%s is not a Differencing disk, can't merge!
+
+.
+:PROGRAM_VHDMAKE_MERGEREPORT
+%d sectors in %d blocks from "%s" merged into "%s".
+
+.
+:PROGRAM_VHDMAKE_MERGENODELETE
+Couldn't remove snapshot "%s", you'll have to do it yourself!
+
+.
+:PROGRAM_VHDMAKE_MERGEOKDELETE
+Snapshot VHD merged and deleted.
+
+.
+:PROGRAM_VHDMAKE_MERGEFAILED
+Failure while merging, aborted!
+.
+:PROGRAM_VHDMAKE_MERGEWARNCORRUPTION
+Parent "%s" contents could be corrupted!
+
+.
+:PROGRAM_VHDMAKE_ABSPATH_WIN
+Warning: an absolute path to parent limits portability to Windows.
+Please prefer a path relative to differencing image file!
+
+.
+:PROGRAM_VHDMAKE_ABSPATH_UX
+ERROR: an absolute path to parent inhibits portability.
+Use a path relative to differencing image file!
+
+.
+:PROGRAM_VHDMAKE_HELP
+Creates Dynamic or Differencing VHD images, or converts raw images
+into Fixed VHD.
+←[32;1mVHDMAKE←[0m [-f] new.vhd size[BKMGT]
+←[32;1mVHDMAKE←[0m ←[34;1m-convert←[0m raw.hdd new.vhd
+←[32;1mVHDMAKE←[0m [-f] ←[34;1m-link←[0m parent.vhd new.vhd
+←[32;1mVHDMAKE←[0m ←[34;1m-merge←[0m delta.vhd
+←[32;1mVHDMAKE←[0m ←[34;1m-info←[0m a.vhd
+ -c | -convert  convert a raw hd image to Fixed VHD, renaming it to new.vhd
+ -l | -link     create a new Differencing VHD new.vhd and link it to the
+                pre-existing parent image parent.vhd
+ -f | -force    force overwriting a pre-existing image file
+ -i | -info     show useful informations about a.vhd image
+ -m | -merge    merge differencing delta.vhd to its parent
+ new.vhd        name of the new Dynamic VHD image to create
+ size           disk size (eventually with size unit, Bytes is implicit)
+When converting a raw disk image to Fixed VHD, it has to be partitioned with
+MBR scheme and formatted with FAT format.
+When creating a Dynamic VHD, its size must range from 3 MB to 2040 GB.
+The Dynamic VHD created is not partitioned nor formatted: to directly mount to
+a drive letter with ←[34;1mIMGMOUNT←[0m, please consider using ←[34;1mIMGMAKE←[0m instead.
+A merged snapshot VHD is automatically deleted if merge is successful.
+.
 :SHELL_CMD_TREE_ERROR
 Aucun sous-répertoire n'existe
 
@@ -1481,11 +1576,11 @@ Le fichier %s existe déjà.
 
 .
 :SHELL_CMD_DIR_BYTES_USED
-%5d Fichier(s) %17s Octets
+%5d Fichier(s) %14s Octets
 
 .
 :SHELL_CMD_DIR_BYTES_FREE
-%5d Dir(s) %17s Octets libres
+%5d Dir(s) %18s Octets libres
 
 .
 :SHELL_CMD_DIR_FILES_LISTED
@@ -2154,18 +2249,18 @@ Affiche ou modifie la page de code DOS actuelle.
 .
 :SHELL_CMD_CHCP_HELP_LONG
 CHCP [nnn [fichier]]
+CHCP nnn[:[langue]]
 
   nnn      Spécifie un numéro de page de code.
-  fichier  Spécifie un fichier de page de code
+  fichier  Spécifie un fichier de page de code.
+  langue   Spécifie une langue correspondante.
   
 Pages de code prises en charge pour être modifiées dans la sortie
 de la police TrueType :
 
-437,737,775,808,850,852,853,855,857,858,860-866,869,872,874,3021
+437,737,775,808,850,852,853,855-869,872,874,1250-1258,3021
 
-Pages de codes Windows: 1250,1251,1252,1253,1254,1255,1256,1257,1258
-
-Également des pages de code à double octet, notamment 932, 936, 949 et 950.
+Également des pages de code à double octet, notamment 932, 936, 949 et 950/951.
 
 Les pages de codes personnalisées sont prises en charge en fournissant des fichiers de pages de codes.
 
@@ -2308,10 +2403,10 @@ Basculer plein écran
 Réinit. taille fenêtre
 .
 :MENU:mapper_dbcssbcs
-CJK : Commutation entre les modes DBCS/SBCS
+CJK: Commutation entre les mode DBCS/SBCS
 .
 :MENU:mapper_autoboxdraw
-CJK : Détection automatique des caractères de type "box-drawing".
+CJK: Détection automatique des caractères de dessin de boîte
 .
 :MENU:mapper_incsize
 Augmenter taille police
@@ -2580,8 +2675,14 @@ xBRZ
 :MENU:scaler_set_xbrz_bilinear
 xBRZ bilinéaire
 .
+:MENU:set_titletext
+Définir le texte de la barre de titre...
+.
+:MENU:set_transparency
+Définir la transparence...
+.
 :MENU:refresh_rate
-Taux de rafraîchissement...
+Définir la taux de rafraîchissement...
 .
 :MENU:VideoOutputMenu
 Sortie Vidéo
@@ -2604,6 +2705,9 @@ OpenGL (Parfait)
 .
 :MENU:output_ttf
 Police de caractères TrueType
+.
+:MENU:output_gamelink
+Game Link
 .
 :MENU:doublescan
 Doublescan
@@ -2741,10 +2845,10 @@ Afficher le texte de droite à gauche
 Utiliser la police actuelle pour l'impression
 .
 :MENU:ttf_halfwidthkana
-CJK : Autoriser les Katakana japonais en demi-largeur
+CJK: Autoriser les Katakana japonais en demi-largeur
 .
 :MENU:ttf_extcharset
-CJK : Activer le jeu de caractères chinois étendu
+CJK: Activer le jeu de caractères chinois étendu
 .
 :MENU:VideoPC98Menu
 PC-98
@@ -2893,6 +2997,15 @@ Activer l'émulation EMS
 :MENU:dos_ems_false
 Désactiver l'émulation EMS
 .
+:MENU:DOSDiskRateMenu
+Limiter la vitesse de transfert du disque
+.
+:MENU:limit_hdd_rate
+Limiter le débit de données du disque dur
+.
+:MENU:limit_floppy_rate
+Limiter le débit de données des disquettes
+.
 :MENU:DOSWinMenu
 Applications du système hôte
 .
@@ -3015,6 +3128,9 @@ Démarrage à partir du disque
 .
 :MENU:drive_bootimg
 Démarrage à partir d'une image disque
+.
+:MENU:drive_saveimg
+Enregistrer sur l'image disque
 .
 :MENU:HelpMenu
 Aide
@@ -3275,8 +3391,8 @@ Redémarrer DOSBox-X
 :MENU:restartconf
 Redémarrer avec un fichier de configuration...
 .
-:MENU:restartlang
-Redémarrer avec un fichier de langue...
+:MENU:loadlang
+Charger le fichier de langue...
 .
 :MENU:auto_lock_mouse
 Verrouiller la souris automatiquement
@@ -3404,9 +3520,6 @@ Afficher l'état du disque IDE ou du CD
 :MENU:pc98_use_uskb
 Utiliser la disposition clavier US
 .
-:MAPPER:caprawopl
-Enreg. sortie FM/OPL
-.
 :MAPPER:copyall
 Copier presse-papiers
 .
@@ -3446,29 +3559,11 @@ Coller presse-papiers
 :MAPPER:pasteend
 Arrêt presse-papiers
 .
-:MAPPER:pauseints
-Pause avec interrupt.
-.
-:MAPPER:prevslot
-Emplacement svg préc.
-.
-:MAPPER:printtext
-Imprimer texte d'écran
-.
 :MAPPER:quickrun
-Lancer prog. rapidement
+Programme de lancement rapide
 .
 :MAPPER:reboot
 Redémarrer le DOS
-.
-:MAPPER:recmtwave
-Enreg. vers M.T. AVI
-.
-:MAPPER:recvoldown
-Diminuer volume enreg.
-.
-:MAPPER:recvolup
-Augmenter volume enreg.
 .
 :MAPPER:rescanall
 Réanalyser lecteurs

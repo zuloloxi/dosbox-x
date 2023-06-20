@@ -151,8 +151,8 @@ bool Overlay_Drive::RemoveDir(const char * dir) {
 		}
 		bool empty = true;
 		do {
-			char name[DOS_NAMELENGTH_ASCII],lname[LFN_NAMELENGTH];uint32_t size;uint16_t date;uint16_t time;uint8_t attr;
-			dta.GetResult(name,lname,size,date,time,attr);
+			char name[DOS_NAMELENGTH_ASCII],lname[LFN_NAMELENGTH];uint32_t size,hsize;uint16_t date;uint16_t time;uint8_t attr;
+			dta.GetResult(name,lname,size,hsize,date,time,attr);
 			if (logoverlay) LOG_MSG("RemoveDir found %s",name);
 			if (empty && strcmp(".",name ) && strcmp("..",name)) 
 				empty = false; //Neither . or .. so directory not empty.
@@ -242,8 +242,10 @@ bool Overlay_Drive::MakeDir(const char * dir) {
 				if (host_name!=NULL) {
 #if defined (WIN32)
 					temp=_wmkdir(host_name);
+					if (temp) temp=_wmkdir_p(host_name);
 #else
 					temp=mkdir(host_name,0775);
+					if (temp) temp=mkdir_p(host_name,0775);
 #endif
 					if (temp==0) madepdir=true;
 				}
@@ -255,8 +257,10 @@ bool Overlay_Drive::MakeDir(const char * dir) {
 	if (host_name!=NULL) {
 #if defined (WIN32)
 		temp=_wmkdir(host_name);
+		if (temp) temp=_wmkdir_p(host_name);
 #else
 		temp=mkdir(host_name,0775);
+		if (temp) temp=mkdir_p(host_name,0775);
 #endif
 	}
 	if (temp==0) {
@@ -342,7 +346,7 @@ public:
 	bool overlay_active;
 };
 
-//Create leading directories of a file being overlayed if they exist in the original (localDrive).
+//Create leading directories of a file being overlaid if they exist in the original (localDrive).
 //This function is used to create copies of existing files, so all leading directories exist in the original.
 
 FILE* Overlay_Drive::create_file_in_overlay(const char* dos_filename, char const* mode) {
@@ -593,6 +597,7 @@ bool Overlay_Drive::FileOpen(DOS_File * * file,const char * name,uint32_t flags)
 			break;
 		}
 	}
+	if (!dos_kernel_disabled)
 	for (i=0;i<DOS_FILES;i++) {
 		if (Files[i] && Files[i]->IsOpen() && Files[i]->GetDrive()==drive && Files[i]->IsName(name)) {
 			lfp=dynamic_cast<localFile*>(Files[i]);
@@ -640,7 +645,7 @@ bool Overlay_Drive::FileOpen(DOS_File * * file,const char * name,uint32_t flags)
 	} else {
 		; //TODO error handling!!!! (maybe check if it exists and read only (should not happen with overlays)
 	}
-	bool overlayed = fileopened;
+	bool overlaid = fileopened;
 
 	//File not present in overlay, try normal drive
 	//TODO take care of file being marked deleted.
@@ -653,7 +658,7 @@ bool Overlay_Drive::FileOpen(DOS_File * * file,const char * name,uint32_t flags)
 		//Convert file to OverlayFile
 		OverlayFile* f = ccc(*file);
 		f->flags = flags; //ccc copies the flags of the localfile, which were not correct in this case
-		f->overlay_active = overlayed; //No need to switch if already in overlayed.
+		f->overlay_active = overlaid; //No need to switch if already in overlay.
 		*file = f;
 	}
 	return fileopened;
@@ -1006,7 +1011,7 @@ bool Overlay_Drive::FindNext(DOS_DTA & dta) {
 	char full_name[CROSS_LEN], lfull_name[LFN_NAMELENGTH+1];
 	char dir_entcopy[CROSS_LEN], ldir_entcopy[CROSS_LEN];
 
-	uint8_t srch_attr;char srch_pattern[DOS_NAMELENGTH_ASCII];
+	uint8_t srch_attr;char srch_pattern[LFN_NAMELENGTH+1];
 	uint8_t find_attr;
 
 	dta.GetSearchParams(srch_attr,srch_pattern,false);
@@ -1106,7 +1111,7 @@ again:
 	
 	/* file is okay, setup everything to be copied in DTA Block */
 	char find_name[DOS_NAMELENGTH_ASCII], lfind_name[LFN_NAMELENGTH+1];
-	uint16_t find_date,find_time;uint32_t find_size;
+	uint16_t find_date,find_time;uint32_t find_size, find_hsize;
 
 	if(strlen(dir_entcopy)<DOS_NAMELENGTH_ASCII){
 		strcpy(find_name,dir_entcopy);
@@ -1115,16 +1120,23 @@ again:
 	strcpy(lfind_name,ldir_entcopy);
     lfind_name[LFN_NAMELENGTH]=0;
 
-	find_size=(uint32_t) stat_block.st_size;
+	find_hsize=(uint32_t) (stat_block.st_size / 0x100000000);
+	find_size=(uint32_t) (stat_block.st_size % 0x100000000);
 	struct tm *time;
-	if((time=localtime(&stat_block.st_mtime))!=0){
+	if((time=
+#if defined(__MINGW32__) && !defined(HX_DOS)
+    _localtime64
+#else
+    localtime
+#endif
+    (&stat_block.st_mtime))!=0){
 		find_date=DOS_PackDate((uint16_t)(time->tm_year+1900),(uint16_t)(time->tm_mon+1),(uint16_t)time->tm_mday);
 		find_time=DOS_PackTime((uint16_t)time->tm_hour,(uint16_t)time->tm_min,(uint16_t)time->tm_sec);
 	} else {
 		find_time=6; 
 		find_date=4;
 	}
-	dta.SetResult(find_name,lfind_name,find_size,find_date,find_time,find_attr);
+	dta.SetResult(find_name,lfind_name,find_size,find_hsize,find_date,find_time,find_attr);
 	return true;
 }
 
@@ -1568,6 +1580,8 @@ void Overlay_Drive::remove_special_file_from_disk(const char* dosname, const cha
 }
 
 std::string Overlay_Drive::create_filename_of_special_operation(const char* dosname, const char* operation, bool expand) {
+	(void)expand;//unused
+
 	std::string res(dosname);
 	std::string::size_type s = std::string::npos; //CHECK DOS or host endings.... on update_cache
 	bool lead = false;
@@ -2060,7 +2074,13 @@ bool Overlay_Drive::FileStat(const char* name, FileStat_Block * const stat_block
 	
 	/* Convert the stat to a FileStat */
 	struct tm *time;
-	if((time=localtime(&temp_stat.st_mtime))!=0) {
+	if((time=
+#if defined(__MINGW32__) && !defined(HX_DOS)
+    _localtime64
+#else
+    localtime
+#endif
+    (&temp_stat.st_mtime))!=0) {
 		stat_block->time=DOS_PackTime((uint16_t)time->tm_hour,(uint16_t)time->tm_min,(uint16_t)time->tm_sec);
 		stat_block->date=DOS_PackDate((uint16_t)(time->tm_year+1900),(uint16_t)(time->tm_mon+1),(uint16_t)time->tm_mday);
 	} else {

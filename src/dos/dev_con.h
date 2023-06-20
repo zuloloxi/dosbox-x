@@ -31,6 +31,7 @@
 
 extern bool inshell;
 extern bool DOS_BreakFlag;
+extern bool INT28_AllowOnce;
 extern bool DOS_BreakConioFlag;
 extern unsigned char pc98_function_row_mode;
 
@@ -55,7 +56,11 @@ uint16_t last_int16_code = 0;
 static size_t dev_con_pos=0,dev_con_max=0;
 static unsigned char dev_con_readbuf[64];
 extern bool CheckHat(uint8_t code);
+extern bool isDBCSCP();
 extern bool inshell;
+#if defined(USE_TTF)
+extern bool ttf_dosv;
+#endif
 
 uint8_t DefaultANSIAttr() {
 	return IS_PC98_ARCH ? 0xE1 : 0x07;
@@ -75,6 +80,9 @@ public:
 		ansi.attr = attr;
 	}
 	uint16_t GetInformation(void);
+	void SetInformation(uint16_t info) {
+		binary = info & DeviceInfoFlags::Binary;
+	}
 	bool ReadFromControlChannel(PhysPt bufptr,uint16_t size,uint16_t * retcode) { (void)bufptr; (void)size; (void)retcode; return false; }
 	bool WriteToControlChannel(PhysPt bufptr,uint16_t size,uint16_t * retcode) { (void)bufptr; (void)size; (void)retcode; return false; }
     bool ANSI_SYS_installed();
@@ -110,7 +118,7 @@ private:
 		bool warned;
 		bool key;
 	} ansi;
-	uint16_t keepcursor;
+	uint16_t binary;
 
 	struct key_change {
 		uint16_t	src;
@@ -691,10 +699,6 @@ public:
 // Section 4-8.
 //
 // The PDF documents ANSI codes defined on PC-98, which may or may not be a complete listing.
-#if defined(USE_TTF)
-extern bool ttf_dosv;
-#endif
-
 bool device_CON::Read(uint8_t * data,uint16_t * size) {
 	uint16_t oldax=reg_ax;
 	uint16_t count=0;
@@ -704,9 +708,9 @@ bool device_CON::Read(uint8_t * data,uint16_t * size) {
 		data[count++]=readcache;
 		if (dos.echo) {
 #if defined(USE_TTF)
-			if (IS_DOSV || ttf_dosv) {
+			if (IS_DOSV || ttf_dosv || IS_PC98_ARCH) {
 #else
-			if (IS_DOSV) {
+			if (IS_DOSV || IS_PC98_ARCH) {
 #endif
 				reg_al = readcache;
 				CALLBACK_RunRealInt(0x29);
@@ -721,7 +725,30 @@ bool device_CON::Read(uint8_t * data,uint16_t * size) {
             continue;
         }
 
-		reg_ah=(IS_EGAVGA_ARCH)?0x10:0x0;
+        const uint8_t int16_poll_function=(IS_EGAVGA_ARCH)?0x11:0x1;
+        const uint8_t int16_read_function=(IS_EGAVGA_ARCH)?0x10:0x0;
+
+        static const bool idle_enabled = ((Section_prop*)control->GetSection("dos"))->Get_bool("dos idle api");
+        if (idle_enabled) {
+            // Poll the keyboard until there is a key-press ready to read. If there
+            // is no input (ZF=0) then call INT 28h to release the rest of our
+            // timeslice to host system.
+            while (true) {
+                reg_ah=int16_poll_function;
+                if (IS_PC98_ARCH)
+                    INT16_Handler_Wrap();
+                else
+                    CALLBACK_RunRealInt(0x16);
+                if (GETFLAG(ZF) == 0) {
+                    break;
+                } else {
+                    INT28_AllowOnce=true;
+                    CALLBACK_RunRealInt(0x28);
+                }
+            }
+        }
+
+		reg_ah=int16_read_function;
 
         /* FIXME: PC-98 emulation should eventually use CONIO emulation that
          *        better emulates the actual platform. The purpose of this
@@ -743,9 +770,9 @@ bool device_CON::Read(uint8_t * data,uint16_t * size) {
 			reg_ax=oldax;
 			if(dos.echo) { 
 #if defined(USE_TTF)
-				if (IS_DOSV || ttf_dosv) {
+				if (IS_DOSV || ttf_dosv || IS_PC98_ARCH) {
 #else
-				if (IS_DOSV) {
+				if (IS_DOSV || IS_PC98_ARCH) {
 #endif
 					reg_al = 13;
 					CALLBACK_RunRealInt(0x29);
@@ -761,18 +788,60 @@ bool device_CON::Read(uint8_t * data,uint16_t * size) {
 		case 8:
 			if(*size==1) data[count++]=reg_al;  //one char at the time so give back that BS
 			else if(count) {                    //Remove data if it exists (extended keys don't go right)
-				data[count--]=0;
-				Real_INT10_TeletypeOutput(8,defattr);
-				Real_INT10_TeletypeOutput(' ',defattr);
+				uint8_t flag = 0;
+				if(IS_PC98_ARCH || isDBCSCP()) {
+					if(count > 1) {
+						for(uint16_t pos = 0 ; pos < count ; pos++) {
+							if(flag == 1) {
+								flag = 2;
+							} else {
+								flag = 0;
+								if(isKanji1(data[pos])) {
+									flag = 1;
+								}
+							}
+						}
+					}
+				}
+				if(flag == 2) {
+					data[count--]=0;
+					data[count--]=0;
+					if(IS_PC98_ARCH) {
+						reg_al = 8; CALLBACK_RunRealInt(0x29);
+						reg_al = 8; CALLBACK_RunRealInt(0x29);
+						reg_al = ' '; CALLBACK_RunRealInt(0x29);
+						reg_al = ' '; CALLBACK_RunRealInt(0x29);
+						reg_al = 8; CALLBACK_RunRealInt(0x29);
+						reg_al = 8; CALLBACK_RunRealInt(0x29);
+						continue;
+					} else {
+						Real_INT10_TeletypeOutput(8, defattr);
+						Real_INT10_TeletypeOutput(8, defattr);
+						Real_INT10_TeletypeOutput(' ', defattr);
+						Real_INT10_TeletypeOutput(' ', defattr);
+						Real_INT10_TeletypeOutput(8, defattr);
+					}
+				} else {
+					data[count--]=0;
+					if(IS_PC98_ARCH) {
+						reg_al = 8; CALLBACK_RunRealInt(0x29);
+						reg_al = ' '; CALLBACK_RunRealInt(0x29);
+						reg_al = 8; CALLBACK_RunRealInt(0x29);
+						continue;
+					} else {
+						Real_INT10_TeletypeOutput(8, defattr);
+						Real_INT10_TeletypeOutput(' ', defattr);
+					}
+				}
 			} else {
 				continue;                       //no data read yet so restart whileloop.
 			}
 			break;
 		case 0xe0: /* Extended keys in the  int 16 0x10 case */
 #if defined(USE_TTF)
-			if((isJEGAEnabled() || IS_DOSV || ttf_dosv) && (reg_ah == 0xf0 || reg_ah == 0xf1)) {
+			if((isJEGAEnabled() || IS_PC98_ARCH || IS_DOSV || ttf_dosv) && (reg_ah == 0xf0 || reg_ah == 0xf1)) {
 #else
-			if((isJEGAEnabled() || IS_DOSV) && (reg_ah == 0xf0 || reg_ah == 0xf1)) {
+			if((isJEGAEnabled() || IS_PC98_ARCH || IS_DOSV) && (reg_ah == 0xf0 || reg_ah == 0xf1)) {
 #endif
 				data[count++]=reg_al;
 			} else if(!reg_ah) { /*extended key if reg_ah isn't 0 */
@@ -820,7 +889,7 @@ bool device_CON::Read(uint8_t * data,uint16_t * size) {
 				}
 			}
 			data[count++]=reg_al;
-			if ((*size > 1 || !inshell) && reg_al == 3) {
+			if ((*size > 1 || !inshell) && reg_al == 3 && !binary) {
 				dos.errorcode=77;
 				*size=count;
 				reg_ax=oldax;
@@ -828,7 +897,8 @@ bool device_CON::Read(uint8_t * data,uint16_t * size) {
 			}
 			break;
 		}
-		if(dos.echo) { //what to do if *size==1 and character is BS ?????
+
+		if(dos.echo && !binary) { //what to do if *size==1 and character is BS ?????
 			// TODO: If CTRL+C checking is applicable do not echo (reg_al == 3)
 #if defined(USE_TTF)
 			if (IS_DOSV || ttf_dosv) {
@@ -857,6 +927,7 @@ bool device_CON::Read(uint8_t * data,uint16_t * size) {
 				Real_INT10_TeletypeOutput(reg_al,defattr);
 		}
 	}
+	INT28_AllowOnce=true;
 	dos.errorcode=0;
 	*size=count;
 	reg_ax=oldax;
@@ -1392,7 +1463,7 @@ uint16_t device_CON::GetInformation(void) {
         }
 
 		reg_ax = saved_ax;
-		return ret;
+		return ret | binary;
 	}
 	else {
 		/* DOSBox mainline behavior: alternate "fast" way through direct manipulation of keyboard scan buffer */
@@ -1410,7 +1481,7 @@ uint16_t device_CON::GetInformation(void) {
 		mem_writew(BIOS_KEYBOARD_BUFFER_HEAD,head);
 	}
 
-	return deviceWord | DeviceInfoFlags::EofOnInput; /* No Key Available */
+	return deviceWord | DeviceInfoFlags::EofOnInput | binary; /* No Key Available */
 }
 
 device_CON::device_CON() {
@@ -1443,6 +1514,8 @@ device_CON::device_CON() {
 	ansi.savecol=0;
 	ansi.warned=false;
 	ClearAnsi();
+
+	binary = 0;
 }
 
 void device_CON::ClearAnsi(void){

@@ -27,6 +27,9 @@
 #include "callback.h"
 #include "cpu.h"		// for 0x3da delay
 
+/* do not issue CPU-side I/O here -- this code emulates functions that the GDC itself carries out, not on the CPU */
+#include "cpu_io_is_forbidden.h"
+
 #define S3_VALIDATE_VIRGE_PORTS
 
 #ifdef S3_VALIDATE_VIRGE_PORTS
@@ -894,11 +897,12 @@ void XGA_DrawWait(Bitu val, Bitu len) {
 							}
 							break;
 						case 0x40 | M_LIN8: // 32 bit
-                            for(int i = 0; i < 4; i++)
+							for(int i = 0; i < 4; i++)
 								XGA_DrawWaitSub(mixmode, (val>>(8*i))&0xff);
 							break;
 						case (0x20 | M_LIN32):
-							if(len!=4) { // Win 3.11 864 'hack?'
+							if(len!=4) { // In case of two 16-bit transfers, first combine both WORDs into a 32-bit DWORD and then operate
+								// Needed for Windows 3.1 with S386c928 drivers, and Windows NT/2000 to display 16x16 radio buttons and icons properly
 								if(xga.waitcmd.datasize == 0) {
 									// set it up to wait for the next word
 									xga.waitcmd.data = (uint32_t)val;
@@ -937,30 +941,42 @@ void XGA_DrawWait(Bitu val, Bitu len) {
 					Bitu chunksize;
 					Bitu chunks;
 					switch(xga.waitcmd.buswidth&0x60) {
-						case 0x0:
+						case 0x0: // 8 bit
 							chunksize=8;
 							chunks=1;
 							break;
 						case 0x20: // 16 bit
 							chunksize=16;
 							if(len==4) chunks=2;
-							else chunks = 1;
+							else chunks=1;
 							break;
 						case 0x40: // 32 bit
-							chunksize=16;
-							if(len==4) chunks=2;
-							else chunks = 1;
+							if(len!=4) { // In case of two 16-bit transfers, first combine both WORDs into a 32-bit DWORD and then operate
+								// Needed for Windows 3.1 with S386c928 drivers, and Windows NT/2000 to display 16x16 radio buttons and icons properly
+								if(xga.waitcmd.datasize == 0) {
+									// set it up to wait for the next word
+									xga.waitcmd.data = (uint32_t)val;
+									xga.waitcmd.datasize = 2;
+									return;
+								} else {
+									srcval = (val<<16)|xga.waitcmd.data;
+									xga.waitcmd.data = 0;
+									xga.waitcmd.datasize = 0;
+								}
+							}
+							chunksize=32;
+							chunks=1;
 							break;
-						case 0x60: // undocumented guess (but works)
+						case 0x60: // 32 bits, byte alignment
 							chunksize=8;
-							chunks=4;
+							chunks=len;
 							break;
 						default:
 							chunksize=0;
 							chunks=0;
 							break;
 					}
-					
+
 					for(Bitu k = 0; k < chunks; k++) { // chunks counter
 						xga.waitcmd.newline = false;
 						for(Bitu n = 0; n < chunksize; n++) { // pixels
@@ -982,10 +998,10 @@ void XGA_DrawWait(Bitu val, Bitu len) {
 									srcval=0;
 									break;
 							}
-                            XGA_DrawWaitSub(mixmode, srcval);
+							XGA_DrawWaitSub(mixmode, srcval);
 
 							if((xga.waitcmd.cury<2048) &&
-							  (xga.waitcmd.cury >= xga.waitcmd.y2)) {
+							   (xga.waitcmd.cury >= xga.waitcmd.y2)) {
 								xga.waitcmd.wait = false;
 								k=1000; // no more chunks
 								break;
@@ -2311,7 +2327,7 @@ void XGA_Write(Bitu port, Bitu val, Bitu len) {
 //	LOG_MSG("XGA: Write to port %x, val %8x, len %x", (unsigned int)port, (unsigned int)val, (unsigned int)len);
 
 #if 0
-	// streams procesing debug
+	// streams processing debug
 	if (port >= 0x8180 && port <= 0x81FF)
 		LOG_MSG("XGA streams processing: Write to port %x, val %8x, len %x",(unsigned int)port,(unsigned int)val,(unsigned int)len);
 #endif
@@ -2557,7 +2573,7 @@ void XGA_Write(Bitu port, Bitu val, Bitu len) {
 		case 0x81EC: // S3 Trio64V+ streams processor, Streams FIFO and RAS Controls (MMIO only)
 			if (s3Card == S3_Trio64V || s3Card >= S3_ViRGE) {
 				/* bits [4:0] should be a value from 0 to 24 to shift priority between primary and secondary.
-				 * The larger the value, the more slots alloted to secondary layer.
+				 * The larger the value, the more slots allotted to secondary layer.
 				 * Allocation is out of 24 slots, therefore values larger than 24 are invalid. */
 				uint8_t thr = val & 0x1Fu;
 				if (thr > 24u) thr -= 16u; // assume some kind of odd malfunction happens on real hardware, check later

@@ -43,8 +43,9 @@ typedef wchar_t host_cnv_char_t;
 typedef char host_cnv_char_t;
 #endif
 extern std::string prefix_local;
-extern bool hidenonrep, ignorespecial;
+extern bool gbk, notrycp, hidenonrep, ignorespecial;
 extern char *CodePageHostToGuest(const host_cnv_char_t *s);
+bool isKanji1_gbk(uint8_t chr), CodePageHostToGuestUTF16(char *d/*CROSS_LEN*/,const uint16_t *s/*CROSS_LEN*/);
 
 #if defined HAVE_SYS_TYPES_H && defined HAVE_PWD_H
 #include <sys/types.h>
@@ -111,6 +112,14 @@ static void W32_ConfDir(std::string& in,bool create) {
 void Cross::GetPlatformResDir(std::string& in) {
 #if defined(MACOSX)
 	in = MacOSXResPath;
+	if (in.empty()) {
+		in = "/usr/local/share/dosbox-x";
+		struct stat info;
+		if ((stat(in.c_str(), &info) != 0) || (!(info.st_mode & S_IFDIR)))
+			in = "/usr/share/dosbox-x";
+		if ((stat(in.c_str(), &info) != 0) || (!(info.st_mode & S_IFDIR)))
+			in = RESDIR;
+	}
 #elif defined(RISCOS)
 	in = "/<DosBox-X$Dir>/resources";
 #elif defined(LINUX)
@@ -121,10 +130,21 @@ void Cross::GetPlatformResDir(std::string& in) {
 
 	// Let's check if the above exists, otherwise use RESDIR
 	struct stat info;
+	if ((stat(in.c_str(), &info) != 0) || (!(info.st_mode & S_IFDIR)))
+		in = "/usr/local/share/dosbox-x";
+	if ((stat(in.c_str(), &info) != 0) || (!(info.st_mode & S_IFDIR)))
+		in = "/usr/share/dosbox-x";
 	if ((stat(in.c_str(), &info) != 0) || (!(info.st_mode & S_IFDIR))) {
 		//LOG_MSG("XDG_DATA_HOME (%s) does not exist. Using %s", in.c_str(), RESDIR);
 	        in = RESDIR;
 	}
+#elif defined(WIN32)
+	in = "C:\\DOSBox-X";
+#if defined(RESDIR)
+	struct stat info;
+	if ((stat(in.c_str(), &info) != 0) || (!(info.st_mode & S_IFDIR)))
+		in = RESDIR;
+#endif
 #elif defined(RESDIR)
 	in = RESDIR;
 #endif
@@ -232,27 +252,45 @@ bool Cross::IsPathAbsolute(std::string const& in) {
 #if defined (WIN32)
 extern bool isDBCSCP();
 
+static bool isDBCSlead(const wchar_t fchar) {
+	if ((fchar & 0x00FF) == fchar) return false;
+	uint16_t uname[4];
+	char text[3];
+	uname[0]=fchar;
+	uname[1]=0;
+	text[0]=0;
+	text[1]=0;
+	text[2]=0;
+	if (CodePageHostToGuestUTF16(text,uname)) return isKanji1_gbk(text[0] & 0xFF);
+	else return false;
+}
+
 /* does the filename fit the 8.3 format? */
 static bool is_filename_8by3w(const wchar_t* fname) {
-	if (CodePageHostToGuest(fname)==NULL) return false;
+    notrycp = true;
+    if (CodePageHostToGuest(fname)==NULL) {notrycp = false;return false;}
+    notrycp = false;
     int i;
 
     /* Is the first part 8 chars or less? */
     i=0;
     while (*fname != 0 && *fname != L'.') {
-		if (*fname<=32||*fname==127||*fname==L'"'||*fname==L'+'||*fname==L'='||*fname==L','||*fname==L';'||*fname==L':'||*fname==L'<'||*fname==L'>'||*fname==L'|'||*fname==L'?'||*fname==L'*') return false;
-		if ((IS_PC98_ARCH || isDBCSCP()) && (*fname & 0xFF00u) != 0u && (*fname & 0xFCu) != 0x08u) i++;
+		if (*fname<=32||*fname==127||*fname==L'"'||*fname==L'+'||*fname==L'='||*fname==L','||*fname==L';'||*fname==L':'||*fname==L'<'||*fname==L'>'||*fname==L'['||*fname==L']'||*fname==L'|'||*fname==L'?'||*fname==L'*') return false;
+		if ((IS_PC98_ARCH && (*fname & 0xFF00u) != 0u && (*fname & 0xFCu) != 0x08u) || (isDBCSCP() && isDBCSlead(*fname))) i++;
 		fname++; i++; 
 	}
     if (i > 8) return false;
 
-    if (*fname == L'.') fname++;
+    if (*fname == L'.') {
+		if (i==0 && *(fname+1) != 0 && !(*(fname+1) == L'.' && *(fname+2) == 0)) return false;
+		fname++;
+	}
 
     /* Is the second part 3 chars or less? A second '.' also makes it a LFN */
     i=0;
     while (*fname != 0 && *fname != L'.') {
-		if (*fname<=32||*fname==127||*fname==L'"'||*fname==L'+'||*fname==L'='||*fname==L','||*fname==L';'||*fname==L':'||*fname==L'<'||*fname==L'>'||*fname==L'|'||*fname==L'?'||*fname==L'*') return false;
-		if ((IS_PC98_ARCH || isDBCSCP()) && (*fname & 0xFF00u) != 0u && (*fname & 0xFCu) != 0x08u) i++;
+		if (*fname<=32||*fname==127||*fname==L'"'||*fname==L'+'||*fname==L'='||*fname==L','||*fname==L';'||*fname==L':'||*fname==L'<'||*fname==L'>'||*fname==L'['||*fname==L']'||*fname==L'|'||*fname==L'?'||*fname==L'*') return false;
+		if ((IS_PC98_ARCH && (*fname & 0xFF00u) != 0u && (*fname & 0xFCu) != 0x08u) || (isDBCSCP() && isDBCSlead(*fname))) i++;
 		fname++; i++;
 	}
     if (i > 3) return false;
@@ -488,7 +526,7 @@ FILE *fopen_wrap(const char *path, const char *mode) {
 			*last = 0;
 			//If this compare fails, then we are dealing with files in / 
 			//Which is outside the scope, but test anyway. 
-			//However as realpath only works for exising files. The testing is 
+			//However as realpath only works for existing files. The testing is 
 			//in that case not done against new files.
 		}
 		char* check = realpath(work,NULL);

@@ -17,7 +17,7 @@
 #ifdef WIN32
 #include "direct.h"
 #endif
-#if defined (__APPLE__)
+#if defined (__OpenBSD__) || defined (__APPLE__)
 #else
 #include <malloc.h>
 #endif
@@ -768,7 +768,7 @@ int my_miniunz(char ** savefile, const char * savefile2, const char * savedir, c
 #        endif
 
         strncpy(filename_try, zipfilename,MAXFILENAME-1);
-        /* strncpy doesnt append the trailing NULL, of the string is too long. */
+        /* strncpy doesn't append the trailing NULL, of the string is too long. */
         filename_try[ MAXFILENAME ] = '\0';
 
 #        ifdef USEWIN32IOAPI
@@ -846,7 +846,7 @@ uLong filetime(char *f, tm_zip *tmzip, uLong *dt)
       len = MAXFILENAME;
 
     strncpy(name, f,MAXFILENAME-1);
-    /* strncpy doesnt append the trailing NULL, of the string is too long. */
+    /* strncpy doesn't append the trailing NULL, of the string is too long. */
     name[ MAXFILENAME ] = '\0';
 
     if (name[len - 1] == '/')
@@ -1217,7 +1217,7 @@ void SaveState::save(size_t slot) { //throw (Error)
 			}
 
 			if(!create_machinetype) {
-				std::string tempname = temp+"Machine_type";
+				std::string tempname = temp+"Machine_Type";
 				std::ofstream machinetype (tempname.c_str(), std::ofstream::binary);
 				machinetype << getType();
 				create_machinetype=true;

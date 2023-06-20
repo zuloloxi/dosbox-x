@@ -234,7 +234,7 @@ bool DOS_CreateTempFile(char * const name,uint16_t * entry);
 bool DOS_FileExists(char const * const name);
 
 /* Helper Functions */
-bool DOS_MakeName(char const * const name,char * const fullname,uint8_t * drive);
+bool DOS_MakeName(char const * const name,char * const fullname,uint8_t * drive,bool isVolume = false);
 /* Drive Handing Routines */
 uint8_t DOS_GetDefaultDrive(void);
 void DOS_SetDefaultDrive(uint8_t drive);
@@ -422,7 +422,7 @@ protected:
 
 class DOS_PSP :public MemStruct {
 public:
-	DOS_PSP						(uint16_t segment)		{ SetPt(segment);seg=segment;};
+	DOS_PSP						(uint16_t segment):seg(segment)		{ SetPt(segment);};
 	void	MakeNew				(uint16_t mem_size);
 	void	CopyFileTable		(DOS_PSP* srcpsp,bool createchildpsp);
 	uint16_t	FindFreeFileEntry	(void);
@@ -522,7 +522,7 @@ public:
 
 class DOS_InfoBlock:public MemStruct {
 public:
-    DOS_InfoBlock() : seg(0) {};
+    DOS_InfoBlock() {};
 	void SetLocation(uint16_t  segment);
     void SetFirstDPB(uint32_t _first_dpb);
 	void SetFirstMCB(uint16_t _firstmcb);
@@ -538,6 +538,9 @@ public:
 	uint8_t	GetUMBChainState(void);
 	RealPt	GetPointer(void);
 	uint32_t GetDeviceChain(void);
+
+	void SetBootDrive(uint8_t drv) { sSave(sDIB,bootDrive,drv); }
+	uint8_t GetBootDrive(void) { return sGet(sDIB,bootDrive); }
 
 	#ifdef _MSC_VER
 	#pragma pack(1)
@@ -596,7 +599,7 @@ public:
 	#ifdef _MSC_VER
 	#pragma pack ()
 	#endif
-	uint16_t	seg;
+	uint16_t	seg = 0;
 };
 
 class DOS_DTA:public MemStruct{
@@ -606,11 +609,11 @@ public:
     int GetFindData(int fmt,char * finddata,int *c);
 	
 	void SetupSearch(uint8_t _sdrive,uint8_t _sattr,char * pattern);
-	void SetResult(const char * _name,const char * _lname,uint32_t _size,uint16_t _date,uint16_t _time,uint8_t _attr);
+	void SetResult(const char * _name,const char * _lname,uint32_t _size,uint32_t _hsize,uint16_t _date,uint16_t _time,uint8_t _attr);
 	
 	uint8_t GetSearchDrive(void);
 	void GetSearchParams(uint8_t & _sattr,char * _spattern,bool lfn);
-    void GetResult(char * _name,char * _lname,uint32_t & _size,uint16_t & _date,uint16_t & _time,uint8_t & _attr);
+    void GetResult(char * _name,char * _lname,uint32_t & _size,uint32_t & _hsize,uint16_t & _date,uint16_t & _time,uint8_t & _attr);
 
 	void	SetDirID(uint16_t entry)			{ sSave(sDTA,dirID,entry); };
 	void	SetDirIDCluster(uint32_t entry)	{ sSave(sDTA,dirCluster,entry); };
@@ -776,10 +779,10 @@ struct DOS_Block {
     DOS_Version version = {};
     uint16_t firstMCB = 0;
     uint16_t errorcode = 0;
-    uint16_t psp();//{return DOS_SDA(DOS_SDA_SEG,DOS_SDA_OFS).GetPSP();};
-    void psp(uint16_t _seg);//{ DOS_SDA(DOS_SDA_SEG,DOS_SDA_OFS).SetPSP(_seg);};
-    RealPt dta();//{return DOS_SDA(DOS_SDA_SEG,DOS_SDA_OFS).GetDTA();};
-    void dta(RealPt _dta);//{DOS_SDA(DOS_SDA_SEG,DOS_SDA_OFS).SetDTA(_dta);};
+    uint16_t psp() const;//{return DOS_SDA(DOS_SDA_SEG,DOS_SDA_OFS).GetPSP();};
+    void psp(uint16_t _seg) const;//{ DOS_SDA(DOS_SDA_SEG,DOS_SDA_OFS).SetPSP(_seg);};
+    RealPt dta() const;//{return DOS_SDA(DOS_SDA_SEG,DOS_SDA_OFS).GetDTA();};
+    void dta(RealPt _dta) const;//{DOS_SDA(DOS_SDA_SEG,DOS_SDA_OFS).SetDTA(_dta);};
     uint8_t return_code = 0, return_mode = 0;
 
     uint8_t current_drive = 0;
@@ -1024,5 +1027,7 @@ const std::map<std::string, int> country_code_map {
 	{"yc450",  COUNTRYNO::Serbia         }, // No-deadkey
 	{"yu",     COUNTRYNO::Yugoslavia     },
 };
+
+void DOS_FlushSTDIN(void);
 
 #endif

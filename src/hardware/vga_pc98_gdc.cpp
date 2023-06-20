@@ -43,6 +43,9 @@
 
 using namespace std;
 
+extern bool vga_render_on_demand;
+void VGA_RenderOnDemandUpTo(void);
+
 extern bool                 gdc_5mhz_mode;
 extern bool                 gdc_5mhz_mode_initial;
 extern bool                 GDC_vsync_interrupt;
@@ -101,6 +104,7 @@ void GDC_ProcDelay(Bitu /*val*/);
 void PC98_show_cursor(bool show);
 void pc98_port6A_command_write(unsigned char b);
 void pc98_port68_command_write(unsigned char b);
+void initRand(void);
 
 PC98_GDC_state::PC98_GDC_state() {
     memset(param_ram,0,sizeof(param_ram));
@@ -148,6 +152,7 @@ PC98_GDC_state::PC98_GDC_state() {
     vertical_back_porch_width = 0;
     reset_fifo();
     reset_rfifo();
+    draw_reset();
 }
 
 size_t PC98_GDC_state::fifo_can_read(void) {
@@ -247,17 +252,31 @@ void PC98_GDC_state::take_cursor_pos(unsigned char bi) {
      *   0 = [3:2] = 0
      *   EAD(H) = [1:0] = address[17:16] */
     if (bi == 1) {
-		vga.config.cursor_start &= ~(0xFFu << 0u);
-		vga.config.cursor_start |=  cmd_parm_tmp[0] << 0u;
+        if(master_sync) {
+            vga.config.cursor_start &= ~(0xFFu << 0u);
+            vga.config.cursor_start |=  cmd_parm_tmp[0] << 0u;
+        } else {
+            draw.ead = cmd_parm_tmp[0];
+        }
     }
     else if (bi == 2) {
-		vga.config.cursor_start &= ~(0xFFu << 8u);
-		vga.config.cursor_start |=  (unsigned int)cmd_parm_tmp[1] << 8u;
+        if(master_sync) {
+            vga.config.cursor_start &= ~(0xFFu << 8u);
+            vga.config.cursor_start |=  (unsigned int)cmd_parm_tmp[1] << 8u;
+        } else {
+            draw.ead |= (uint32_t)cmd_parm_tmp[1] << 8;
+        }
     }
     else if (bi == 3) {
-		vga.config.cursor_start &= ~(0x03u << 16u);
-		vga.config.cursor_start |=  (cmd_parm_tmp[2] & 3u) << 16u;
-
+        if(master_sync) {
+            vga.config.cursor_start &= ~(0x03u << 16u);
+            vga.config.cursor_start |=  (cmd_parm_tmp[2] & 3u) << 16u;
+        } else {
+            draw.ead |= (uint32_t)(cmd_parm_tmp[2] & 0x03) << 16;
+            draw.dad = (uint8_t)(cmd_parm_tmp[2] >> 4);
+            draw.base = gram_base[(draw.ead >> 14) & 3];
+            draw.wg = cmd_parm_tmp[2] & 0x08;
+        }
         // TODO: "dot address within the word"
     }
 }
@@ -322,6 +341,7 @@ void PC98_GDC_state::idle_proc(void) {
                 idle = true;
                 reset_fifo();
                 reset_rfifo();
+                draw_reset();
                 break;
             case GDC_CMD_DISPLAY_BLANK:  // 0x0C   0 0 0 0 1 1 0 DE
             case GDC_CMD_DISPLAY_BLANK+1:// 0x0D   DE=display enable
@@ -334,6 +354,14 @@ void PC98_GDC_state::idle_proc(void) {
                 current_command &= ~1;
                 LOG_MSG("GDC: sync");
                 break;
+            case GDC_CMD_MODE_REPLACE:        // 0x20        0 0 1 0 0 0 0 0
+            case GDC_CMD_MODE_COMPLEMENT:     // 0x21        0 0 1 0 0 0 0 1
+            case GDC_CMD_MODE_CLEAR:          // 0x22        0 0 1 0 0 0 1 0
+            case GDC_CMD_MODE_SET:            // 0x23        0 0 1 0 0 0 1 1
+                draw.mode = current_command & 0x03;
+                break;
+            case GDC_CMD_ZOOM:                // 0x46        0 1 0 0 0 1 1 0
+                break;
             case GDC_CMD_PITCH_SPEC:          // 0x47        0 1 0 0 0 1 1 1
                 break;
             case GDC_CMD_CURSOR_POSITION:     // 0x49        0 1 0 0 1 0 0 1
@@ -341,6 +369,14 @@ void PC98_GDC_state::idle_proc(void) {
                 break;
             case GDC_CMD_CURSOR_CHAR_SETUP:   // 0x4B        0 1 0 0 1 0 1 1
 //              LOG_MSG("GDC: cursor setup");
+                break;
+            case GDC_CMD_VECTW:
+                break;
+            case GDC_CMD_TEXTE:               // 0x68        0 1 1 0 1 0 0 0
+            case GDC_CMD_VECTE:               // 0x6C        0 1 1 0 1 1 0 0
+                if(!master_sync) {
+                    exec(current_command);
+                }
                 break;
             case GDC_CMD_START_DISPLAY:       // 0x6B        0 1 1 0 1 0 1 1
                 display_enable = true;
@@ -396,6 +432,12 @@ void PC98_GDC_state::idle_proc(void) {
                     }
                 }
                 break;
+            case GDC_CMD_ZOOM:
+                if(proc_step < 1) {
+                    draw.zoom = (uint8_t)(val & 0x0f);
+                    proc_step++;
+                }
+                break;
             case GDC_CMD_PITCH_SPEC:
                 if (proc_step < 1)
                     display_pitch = (val != 0) ? val : 0x100;
@@ -404,6 +446,12 @@ void PC98_GDC_state::idle_proc(void) {
                 if (proc_step < 3) {
                     cmd_parm_tmp[proc_step++] = (uint8_t)val;
                     take_cursor_pos(proc_step);
+                }
+                break;
+            case GDC_CMD_VECTW:
+                if(proc_step < 11) {
+                    cmd_parm_tmp[proc_step++] = (uint8_t)val;
+                    vectw(proc_step);
                 }
                 break;
             case GDC_CMD_CURSOR_CHAR_SETUP:
@@ -415,6 +463,15 @@ void PC98_GDC_state::idle_proc(void) {
                 }
                 break;
             case GDC_CMD_PARAMETER_RAM_LOAD:
+                /* Parameter bytes 8 and 9 hold the 16-bit pattern for graphics.
+                 * nanshiki's original code seems to imply that somehow the hardware
+                 * supports either a 64-bit pattern across the 8 bytes or 4 16-bit
+                 * patterns across the same. Given that a few PC-9821 games exploit
+                 * a bug in older hardware to get 4 display partitions in graphics,
+                 * that wouldn't surprise me.
+                 *
+                 * PC-98 Windows 3.1 requires us to do this or else lines do not draw properly. */
+                if (param_ram_wptr >= 8 && param_ram_wptr <= 15) draw.tx[param_ram_wptr-8] = (uint8_t)val;
                 param_ram[param_ram_wptr] = (uint8_t)val;
                 if ((++param_ram_wptr) >= 16) param_ram_wptr = 0;
                 break;
@@ -467,12 +524,14 @@ void PC98_GDC_state::begin_frame(void) {
     scan_address = 0;
     display_partition = 0;
 
-    /* the actual starting address is determined by the display partition in paramter RAM */
+    /* the actual starting address is determined by the display partition in parameter RAM */
     load_display_partition();
 }
 
 void PC98_GDC_state::load_display_partition(void) {
     unsigned char *pram = param_ram + (display_partition * 4);
+
+    dbg_ev_partition = true;
 
     scan_address  =  pram[0];
     scan_address +=  pram[1]         << 8;
@@ -571,6 +630,8 @@ uint8_t PC98_GDC_state::read_status(void) {
     double timeInLine=fmod(timeInFrame,vga.draw.delay.htotal);
     uint8_t ret;
 
+    if (vga_render_on_demand && display_enable) VGA_RenderOnDemandUpTo();
+
     ret  = 0x00; // light pen not present
 
     if (timeInLine >= vga.draw.delay.hblkstart && 
@@ -594,6 +655,18 @@ uint8_t PC98_GDC_state::read_status(void) {
         ret |= 0x02; // FIFO full
     if (rfifo_has_content())
         ret |= 0x01; // data ready
+    else if (fifo_read == fifo_write) {
+#if 0 // THIS IS CAUSING SEVERE PERFORMANCE ISSUES, DISABLED!
+	// According to
+	// [http://hackipedia.org/browse.cgi/Computer/Platform/PC%2c%20NEC%20PC%2d98/Collections/Undocumented%209801%2c%209821%20Volume%202%20%28webtech.co.jp%29/io%5fdisp%2etxt]
+	// bit 3 (0x08) is supposed to indicate when the GDC is drawing. Perhaps the contributer who's
+	// pull request added this found a PC-98 game that failed to run without it. Re-enable when a
+	// higher performance implementation is possible. Also, recent commits in 2022 added actual
+	// GDC drawing functionality, so perhaps this should mirror that too?
+        initRand();
+        if (rand()%20<1) ret |= 0x08;
+#endif
+    }
 
     return ret;
 }
@@ -708,6 +781,7 @@ void pc98_gdc_write(Bitu port,Bitu val,Bitu iolen) {
                  *      change until vsync to try to alleviate tearlines. */
                 GDC_display_plane_pending = (val&1);
                 if (!GDC_display_plane_wait_for_vsync) {
+                    if (vga_render_on_demand) VGA_RenderOnDemandUpTo();
                     GDC_display_plane = GDC_display_plane_pending;
                     pc98_update_display_page_ptr();
                 }
@@ -730,6 +804,7 @@ void pc98_gdc_write(Bitu port,Bitu val,Bitu iolen) {
                         /* 0x68: A command */
                         /* NTS: Sadly, "undocumented PC-98" reference does not mention the analog 16-color palette. */
             if (port == 0xA8) {
+                if (vga_render_on_demand) VGA_RenderOnDemandUpTo();
                 if (gdc_analog) { /* 16/256-color mode */
                     pc98_16col_analog_rgb_palette_index = (uint8_t)val; /* it takes all 8 bits I assume because of 256-color mode */
                 }
@@ -746,6 +821,7 @@ void pc98_gdc_write(Bitu port,Bitu val,Bitu iolen) {
                            16-color: 4-bit green intensity. Color index is low 4 bits of palette index.
                            256-color: 4-bit green intensity. Color index is 8-bit palette index. */
             if (port == 0xAA) { /* TODO: If 8-color... else if 16-color... else if 256-color... */
+                if (vga_render_on_demand) VGA_RenderOnDemandUpTo();
                 if (gdc_analog) { /* 16/256-color mode */
                     if (pc98_gdc_vramop & (1 << VOPBIT_VGA)) {
                         pc98_pal_vga[(3*pc98_16col_analog_rgb_palette_index) + 0] = (uint8_t)val;
@@ -771,6 +847,7 @@ void pc98_gdc_write(Bitu port,Bitu val,Bitu iolen) {
                            16-color: 4-bit red intensity. Color index is low 4 bits of palette index.
                            256-color: 4-bit red intensity. Color index is 8-bit palette index. */
             if (port == 0xAC) { /* TODO: If 8-color... else if 16-color... else if 256-color... */
+                if (vga_render_on_demand) VGA_RenderOnDemandUpTo();
                 if (gdc_analog) { /* 16/256-color mode */
                     if (pc98_gdc_vramop & (1 << VOPBIT_VGA)) {
                         pc98_pal_vga[(3*pc98_16col_analog_rgb_palette_index) + 1] = (uint8_t)val;
@@ -796,6 +873,7 @@ void pc98_gdc_write(Bitu port,Bitu val,Bitu iolen) {
                            16-color: 4-bit blue intensity. Color index is low 4 bits of palette index.
                            256-color: 4-bit blue intensity. Color index is 8-bit palette index. */
             if (port == 0xAE) { /* TODO: If 8-color... else if 16-color... else if 256-color... */
+                if (vga_render_on_demand) VGA_RenderOnDemandUpTo();
                 if (gdc_analog) { /* 16/256-color mode */
                     if (pc98_gdc_vramop & (1 << VOPBIT_VGA)) {
                         pc98_pal_vga[(3*pc98_16col_analog_rgb_palette_index) + 2] = (uint8_t)val;
@@ -834,6 +912,8 @@ Bitu pc98_gdc_read(Bitu port,Bitu iolen) {
 
     switch (port&0xE) {
         case 0x00:      /* 0x60/0xA0 read status */
+            /* If a game is polling this port a lot, it might be waiting for vertical retrace or doing raster effects */
+            if (vga_render_on_demand) VGA_RenderOnDemandUpTo();
             return gdc->read_status();
         case 0x02:      /* 0x62/0xA2 read fifo */
             if (!gdc->rfifo_has_content())

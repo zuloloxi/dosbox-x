@@ -27,7 +27,7 @@ extern CallBack_Handler CallBack_Handlers[];
 
 enum { CB_RETN,CB_RETF,CB_RETF8,CB_IRET,CB_IRETD,CB_IRET_STI,CB_IRET_EOI_PIC1,
 		CB_IRQ0,CB_IRQ1,CB_IRQ1_BREAK,CB_IRQ9,CB_IRQ12,CB_IRQ12_RET,CB_MOUSE,
-		/*CB_INT28,*/CB_INT29,CB_INT16,CB_HOOKABLE,CB_TDE_IRET,CB_IPXESR,CB_IPXESR_RET,
+		CB_INT28,CB_INT29,CB_INT16,CB_HOOKABLE,CB_TDE_IRET,CB_IPXESR,CB_IPXESR_RET,
 		CB_INT21,CB_INT13,CB_VESA_WAIT,CB_VESA_PM,CB_IRET_EOI_PIC2,CB_CPM,
         CB_RETF_STI,CB_RETF_CLI,CB_INT6F_ATOK};
 
@@ -81,16 +81,16 @@ extern Bitu call_priv_io;
 
 class CALLBACK_HandlerObject{
 private:
-	bool installed;
-	Bitu m_callback;
-	enum {NONE,SETUP,SETUPAT} m_type;
+	bool installed = false;
+	Bitu m_callback = 0; // NULL
+	enum {NONE,SETUP,SETUPAT} m_type = NONE;
     struct {	
 		RealPt old_vector;
 		uint8_t interrupt;
 		bool installed;
 	} vectorhandler;
 public:
-	CALLBACK_HandlerObject():installed(false),m_callback(0/*NULL*/),m_type(NONE) {
+	CALLBACK_HandlerObject() {
 		vectorhandler.installed=false;
 	}
 	~CALLBACK_HandlerObject();

@@ -16,6 +16,7 @@
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
  */
 
+#include <queue>
 
 #include "dosbox.h"
 #include "callback.h"
@@ -101,9 +102,9 @@ static scancode_tbl scan_to_scanascii[MAX_SCAN_CODE + 1] = {
       { 0x266c, 0x264c, 0x260c, 0x2600 ,0x26d8, 0x2600 }, /* 26 L */
       { 0x273b, 0x273a,   none, 0x27f0 ,0x27da, 0x2700 }, /* 27 ;: */
       { 0x2827, 0x2822,   none, 0x28f0 ,0x28b9, 0x2800 }, /* 28 '" */
-      { 0x2960, 0x297e,   none, 0x29f0 ,0x29d1, 0x29a3 }, /* 29 `~ */ //29h `~ﾑ｣
-      {   none,   none,   none,   none,   none,   none }, /*  2a L shift */
-      { 0x2b5c, 0x2b7c, 0x2b1c, 0x2bf0 ,0x2bb0, 0x2bf0 }, /* 2b */ //2bh \|ｰ
+      { 0x2960, 0x297e,   none, 0x29f0 ,0x29d1, 0x29a3 }, /* 29 "`" "~"  /  29h "`" "~" "ﾑ" "｣" */
+      {   none,   none,   none,   none,   none,   none }, /* 2a L shift */
+      { 0x2b5c, 0x2b7c, 0x2b1c, 0x2bf0 ,0x2bb0, 0x2bf0 }, /* 2b "*" "/"  /  2bh "\\" "|" "ｰ" */
       { 0x2c7a, 0x2c5a, 0x2c1a, 0x2c00 ,0x2cc2, 0x2caf }, /* 2c Z */
       { 0x2d78, 0x2d58, 0x2d18, 0x2d00 ,0x2dbb, 0x2d00 }, /* 2d X */
       { 0x2e63, 0x2e43, 0x2e03, 0x2e00 ,0x2ebf, 0x2e00 }, /* 2e C */
@@ -119,7 +120,7 @@ static scancode_tbl scan_to_scanascii[MAX_SCAN_CODE + 1] = {
       {   none,   none,   none,   none ,   none,   none }, /*  38 L Alt */
       { 0x3920, 0x3920, 0x3920, 0x3920 , 0x3920, 0x3920 }, /* 39 space */
       {   none,   none,   none,   none ,   none,   none }, /*  3a caps lock */
-//    { 0x3a00, 0x3a00,   none,   none , 0x3a00, 0x3a00 }, /* 3a Kanji */
+//    { 0x3a00, 0x3a00,   none,   none , 0x3a00, 0x3a00 }, -- 3a Kanji --
       { 0x3b00, 0x5400, 0x5e00, 0x6800 ,0x3b00, 0x5400 }, /* 3b F1 */
       { 0x3c00, 0x5500, 0x5f00, 0x6900 ,0x3c00, 0x5500 }, /* 3c F2 */
       { 0x3d00, 0x5600, 0x6000, 0x6a00 ,0x3d00, 0x5600 }, /* 3d F3 */
@@ -295,7 +296,6 @@ static scancode_tbl scan_to_scanascii_pc98[0x80] = {
     {   none,   none,   none,   none,   none,   none }  /* 7f      */
 };
 
-#include <queue>
 std::queue <uint16_t>over_key_buffer;
 
 extern bool inshell;
@@ -363,7 +363,7 @@ bool BIOS_AddKeyToBuffer(uint16_t code) {
         }
     }
     /* Check for buffer Full */
-    //TODO Maybe beeeeeeep or something although that should happend when internal buffer is full
+    //TODO Maybe beeeeeeep or something although that should happened when internal buffer is full
     if (ttail==head) {
 #if defined(USE_TTF)
         if(IS_DOSV || ttf_dosv) {
@@ -722,7 +722,6 @@ static Bitu IRQ1_Handler(void) {
     case 0x53: /* del . Not entirely correct, but works fine */
         if (scancode == 0x53 && !(flags3 & 0x01) && !(flags1 & 0x03) && (flags1 & 0x0c) == 0x0c && ((!(flags3 & 0x10) && (flags3 & 0x0c) == 0x0c) || ((flags3 & 0x10) && (flags2 & 0x03) == 0x03))) { /* Ctrl-Alt-Del? */
 			throw int(3);
-            break;
 		}
         if(flags3 &0x02) {  /*extend key. e.g key above arrows or arrows*/
             if(scancode == 0x52) flags2 |=0x80; /* press insert */         
@@ -1080,7 +1079,6 @@ static Bitu IRQ1_Handler_PC98(void) {
                             add_key(scan_add + '\'');
                             break;
                         }
-                        break;
                     default:
                         if (shift){
                             if (scan_to_scanascii_pc98[sc_8251].shift) add_key(scan_to_scanascii_pc98[sc_8251].shift);
@@ -1162,13 +1160,25 @@ static bool IsEnhancedKey(uint16_t &key) {
     return false;
 }
 
-#if defined(WIN32) && !defined(HX_DOS) && defined(C_SDL2)
+#if defined(C_SDL2)
+#if defined(WIN32) && !defined(HX_DOS)
 extern void IME_SetEnable(BOOL state);
 extern bool IME_GetEnable();
+#elif defined(MACOSX)
+extern bool IME_GetEnable();
+extern void IME_SetEnable(int state);
+#ifndef TRUE
+#define TRUE 1
+#endif
+#ifndef FALSE
+#define FALSE 0
+#endif
+#endif
 #endif
 
 extern bool DOS_BreakFlag;
 extern bool DOS_BreakConioFlag;
+extern bool INT28_AllowOnce;
 
 bool int16_unmask_irq1_on_read = true;
 bool int16_ah_01_cf_undoc = true;
@@ -1187,6 +1197,7 @@ Bitu INT16_Handler(void) {
             return CBRET_NONE;
         }
 
+        INT28_AllowOnce = true;
         if ((get_key(temp)) && (!IsEnhancedKey(temp))) {
             /* normal key found, return translated key in ax */
             reg_ax=temp;
@@ -1206,6 +1217,7 @@ Bitu INT16_Handler(void) {
             return CBRET_NONE;
         }
 
+        INT28_AllowOnce = true;
         if (get_key(temp)) {
             if (!IS_PC98_ARCH && ((temp&0xff)==0xf0) && (temp>>8)) {
                 /* special enhanced key, clear low part before returning key */
@@ -1223,6 +1235,7 @@ Bitu INT16_Handler(void) {
         if (int16_unmask_irq1_on_read)
             PIC_SetIRQMask(1,false); /* unmask keyboard */
 
+        INT28_AllowOnce = true;
         for (;;) {
             if (check_key(temp)) {
                 if (!IsEnhancedKey(temp)) {
@@ -1260,6 +1273,7 @@ Bitu INT16_Handler(void) {
          *
          * TODO: If you run EDIT.COM on real MS-DOS, does the same problem come up? */
 
+        INT28_AllowOnce = true;
         if (!check_key(temp)) {
             CALLBACK_SZF(true);
         } else {
@@ -1296,7 +1310,7 @@ Bitu INT16_Handler(void) {
                  (mem_readb(BIOS_KEYBOARD_FLAGS3)&0x0c);    // Right Ctrl/Alt pressed, bits 2,3
         break;
     case 0x13:
-#if defined(WIN32) && !defined(HX_DOS) && !defined(C_SDL2) && defined(SDL_DOSBOX_X_SPECIAL)
+#if (defined(WIN32) && !defined(HX_DOS) || defined(MACOSX)) && !defined(C_SDL2) && defined(SDL_DOSBOX_X_SPECIAL)
 #if defined(USE_TTF)
         if((IS_DOSV || ttf_dosv) && IS_DOS_CJK && (DOSV_GetFepCtrl() & DOSV_FEP_CTRL_IAS)) {
 #else
@@ -1316,7 +1330,7 @@ Bitu INT16_Handler(void) {
                 }
             }
         }
-#elif defined(WIN32) && !defined(HX_DOS) && defined(C_SDL2)
+#elif (defined(WIN32) && !defined(HX_DOS) || defined(MACOSX)) && defined(C_SDL2)
 #if defined(USE_TTF)
         if((IS_DOSV || ttf_dosv) && IS_DOS_CJK && (DOSV_GetFepCtrl() & DOSV_FEP_CTRL_IAS)) {
 #else
@@ -1380,6 +1394,10 @@ Bitu INT16_Handler(void) {
     case 0x55:
         /* Weird call used by some dos apps */
         LOG(LOG_BIOS,LOG_NORMAL)("INT16:55:Word TSR compatible call");
+        break;
+    case 0xdb:
+        // ETen call
+        // reg_ax = 8000;
         break;
     case 0xf0:
         // J-3100 beep

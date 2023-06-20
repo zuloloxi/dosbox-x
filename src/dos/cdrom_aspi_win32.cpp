@@ -61,15 +61,6 @@ typedef union {
 // Windows ASPI functions (should work for all WIN with ASPI layer)
 // *****************************************************************
 
-CDROM_Interface_Aspi::CDROM_Interface_Aspi(void)
-{
-	hASPI					= NULL;
-	hEvent					= NULL;
-	pGetASPI32SupportInfo	= NULL;
-	pSendASPI32Command		= NULL;
-	memset(&oldLeadOut,0,sizeof(oldLeadOut));
-};
-
 CDROM_Interface_Aspi::~CDROM_Interface_Aspi(void)
 {
 	// Stop Audio
@@ -263,6 +254,7 @@ bool CDROM_Interface_Aspi::ScanRegistry(HKEY& hKeyBase)
 
 bool CDROM_Interface_Aspi::SetDevice(char* path, int forceCD)
 {
+    (void)forceCD;
 	// load WNASPI32.DLL
 	hASPI = LoadLibrary ( "WNASPI32.DLL" );
 	if (!hASPI) return false;
@@ -336,6 +328,7 @@ bool CDROM_Interface_Aspi::GetAudioTrackInfo	(int track, TMSF& start, unsigned c
 
 HANDLE CDROM_Interface_Aspi::OpenIOCTLFile(char cLetter,BOOL bAsync)
 {
+    (void)bAsync;
 	HANDLE hF;
 	char szFName[16];
 	OSVERSIONINFO ov;
@@ -768,6 +761,10 @@ bool CDROM_Interface_Aspi::ReadSectors(PhysPt buffer, bool raw, unsigned long se
 
 bool CDROM_Interface_Aspi::ReadSectorsHost(void *buffer, bool raw, unsigned long sector, unsigned long num)
 {
+    (void)buffer;
+    (void)raw;
+    (void)sector;
+    (void)num;
 	return false;/*TODO*/
 };
 

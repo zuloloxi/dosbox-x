@@ -43,6 +43,19 @@ class DOS_Shell;
  * by "external" programs. (config) */
 extern DOS_Shell * first_shell;
 
+const std::map<int, std::string> langcp_map {
+	{437, "en_US"},
+	{850, "de_DE"},
+	{857, "tr_TR"},
+	{858, "es_ES"},
+	{859, "fr_FR"},
+	{860, "pt_BR"},
+	{932, "ja_JP"},
+	{936, "zh_CN"},
+	{949, "ko_KR"},
+	{950, "zh_TW"},
+	{951, "zh_TW"},
+};
 
 class BatchFile {
 public:
@@ -363,10 +376,10 @@ struct SHELL_Cmd {
  * as well if the line set a a variable */
 class AutoexecObject{
 private:
-	bool installed;
+	bool installed = false;
 	std::string buf;
 public:
-	AutoexecObject():installed(false){ };
+	AutoexecObject() {};
 	void Install(std::string const &in);
 	void InstallBefore(std::string const &in);
 	void Uninstall();
@@ -374,5 +387,7 @@ public:
 private:
 	void CreateAutoexec(void);
 };
+
+size_t GetPauseCount();
 
 #endif

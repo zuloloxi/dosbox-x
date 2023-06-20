@@ -256,7 +256,7 @@ bool DOS_Shell::BuildCompletions(char * line, uint16_t str_len) {
 
     DOS_DTA dta(dos.dta());
     char name[DOS_NAMELENGTH_ASCII], lname[LFN_NAMELENGTH], qlname[LFN_NAMELENGTH+2];
-    uint32_t sz;uint16_t date;uint16_t time;uint8_t att;
+    uint32_t sz,hsz;uint16_t date;uint16_t time;uint8_t att;
 
     std::list<std::string> executable;
     q=0;r=0;
@@ -272,7 +272,7 @@ bool DOS_Shell::BuildCompletions(char * line, uint16_t str_len) {
     int fbak=lfn_filefind_handle;
     lfn_filefind_handle=uselfn?LFN_FILEFIND_INTERNAL:LFN_FILEFIND_NONE;
     while (res) {
-        dta.GetResult(name,lname,sz,date,time,att);
+        dta.GetResult(name,lname,sz,hsz,date,time,att);
         if ((strchr(uselfn?lname:name,' ')!=NULL&&q/2*2==q)||r)
             sprintf(qlname,q/2*2!=q?"%s\"":"\"%s\"",uselfn?lname:name);
         else
@@ -962,7 +962,6 @@ void DOS_Shell::InputCommand(char * line) {
                         ++w_count;
                         if (w_count % col == 0) {p_count++;WriteOut_NoParsing("\n");lastcr=true;}
                     }
-                    size_t GetPauseCount();
                     if (p_count>GetPauseCount()) {
                         WriteOut(MSG_Get("SHELL_CMD_PAUSE"));
                         lastcr=false;
@@ -1168,7 +1167,7 @@ void DOS_Shell::ProcessCmdLineEnvVarStitution(char *line) {
      * ^ WTF?
      *
      * So the below code has funny conditions to match Win95's weird rules on what
-     * consitutes valid or invalid %variable% names. */
+     * constitutes valid or invalid %variable% names. */
 
     /* continue scanning for the ending '%'. variable names are apparently meant to be
      * alphanumeric, start with a letter, without spaces (if Windows 95 COMMAND.COM is
@@ -1425,7 +1424,7 @@ continue_1:
 		/* Fill the command line */
 		CommandTail cmdtail;
 		cmdtail.count = 0;
-        memset(&cmdtail.buffer,0,CTBUF); //Else some part of the string is unitialized (valgrind)
+        memset(&cmdtail.buffer,0,CTBUF); //Else some part of the string is uninitialized (valgrind)
         if (strlen(line)>=CTBUF) line[CTBUF-1]=0;
 		cmdtail.count=(uint8_t)strlen(line);
 		memcpy(cmdtail.buffer,line,strlen(line));
@@ -1434,12 +1433,12 @@ continue_1:
 		MEM_BlockWrite(SegPhys(ss)+reg_sp+0x100,&cmdtail,CTBUF+1);
 		
 		/* Split input line up into parameters, using a few special rules, most notable the one for /AAA => A\0AA
-		 * Qbix: It is extremly messy, but this was the only way I could get things like /:aa and :/aa to work correctly */
+		 * Qbix: It is extremely messy, but this was the only way I could get things like /:aa and :/aa to work correctly */
 		
 		//Prepare string first
 		char parseline[258] = { 0 };
 		for(char *pl = line,*q = parseline; *pl ;pl++,q++) {
-			if (*pl == '=' || *pl == ';' || *pl ==',' || *pl == '\t' || *pl == ' ') *q = 0; else *q = *pl; //Replace command seperators with 0.
+			if (*pl == '=' || *pl == ';' || *pl ==',' || *pl == '\t' || *pl == ' ') *q = 0; else *q = *pl; //Replace command separators with 0.
 		} //No end of string \0 needed as parseline is larger than line
 
 		for(char* p = parseline; (p-parseline) < 250 ;p++) { //Stay relaxed within boundaries as we have plenty of room

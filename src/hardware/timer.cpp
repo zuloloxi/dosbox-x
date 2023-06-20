@@ -54,9 +54,9 @@ struct PIT_Block {
 
     Bitu cntr = 0;          /* counter value written to 40h-42h as the interval. may take effect immediately (after port 43h) or after count expires */
     Bitu cntr_cur = 0;      /* current counter value in effect */
-    double delay = 0;       /* interval (in ms) between one full count cycle */
-    double start = 0;       /* time base (in ms) that cycle started at */
-    double now = 0;         /* current time (in ms) */
+    pic_tickindex_t delay = 0;       /* interval (in ms) between one full count cycle */
+    pic_tickindex_t start = 0;       /* time base (in ms) that cycle started at */
+    pic_tickindex_t now = 0;         /* current time (in ms) */
 
     uint16_t read_latch = 0;  /* counter value, latched for read back */
     uint16_t write_latch = 0; /* counter value, written by host */
@@ -91,7 +91,7 @@ struct PIT_Block {
         assert(new_cntr != 0);
 
         cntr_cur = new_cntr;
-        delay = ((double)(1000ul * cntr_cur)) / PIT_TICK_RATE;
+        delay = ((pic_tickindex_t)(1000ul * cntr_cur)) / PIT_TICK_RATE;
     }
     void latch_next_counter(void) {
         set_active_counter(cntr);
@@ -101,12 +101,12 @@ struct PIT_Block {
         cycle_base = 0;
     }
     void restart_counter_at(pic_tickindex_t t,uint16_t counter) {
-        double c_delay;
+        pic_tickindex_t c_delay;
 
         if (counter == 0)
-            c_delay = ((double)(1000ull * 0x10000)) / PIT_TICK_RATE;
+            c_delay = ((pic_tickindex_t)(1000ull * 0x10000)) / PIT_TICK_RATE;
         else
-            c_delay = ((double)(1000ull * counter)) / PIT_TICK_RATE;
+            c_delay = ((pic_tickindex_t)(1000ull * counter)) / PIT_TICK_RATE;
 
         start = (t - c_delay);
     }
@@ -117,7 +117,7 @@ struct PIT_Block {
          * Mode 1 will count down and stop. TODO: Writing a new counter without "new mode" starts another countdown? */
         /* if any periodic mode (Mode 2, 3, 4, 5), then process fully. */
         if (mode == 3) {
-            const double half = delay / 2;
+            const pic_tickindex_t half = delay / 2;
 
             if (now >= (start+half)) {
                 cycle_base = (cycle_base + 1u) & 1u;
@@ -152,7 +152,7 @@ struct PIT_Block {
         if (now < start)
             now = start;
     }
-    double reltime(void) const {
+    pic_tickindex_t reltime(void) const {
         return now - start;
     }
 
@@ -236,24 +236,24 @@ struct PIT_Block {
     }
 
     read_counter_result read_counter(void) const {//This assumes you call track_time()
-        if (!gate)
+        if (!gate || new_mode || (mode == 0 && write_state == 0)/*mode 0 midway through 16-bit write also halts counter*/)
             return last_counter;
 
-        const double index = reltime();
+        const pic_tickindex_t index = reltime();
         read_counter_result ret;
 
         switch (mode) {
             case 4:		/* Software Triggered Strobe */
             case 0:		/* Interrupt on Terminal Count */
                 {
-                    double tmp;
+                    pic_tickindex_t tmp;
 
                     /* Counter keeps on counting after passing terminal count */
                     if (bcd) {
-                        tmp = fmod(index,((double)(1000ul *   10000ul)) / PIT_TICK_RATE);
+                        tmp = pic_tickfmod(index,((pic_tickindex_t)(1000ul *   10000ul)) / PIT_TICK_RATE);
                         ret.counter = (uint16_t)(((unsigned long)(cntr_cur - ((tmp * PIT_TICK_RATE) / 1000.0))) %   10000ul);
                     } else {
-                        tmp = fmod(index,((double)(1000ul * 0x10000ul)) / PIT_TICK_RATE);
+                        tmp = pic_tickfmod(index,((pic_tickindex_t)(1000ul * 0x10000ul)) / PIT_TICK_RATE);
                         ret.counter = (uint16_t)(((unsigned long)(cntr_cur - ((tmp * PIT_TICK_RATE) / 1000.0))) % 0x10000ul);
                     }
 
@@ -271,14 +271,14 @@ struct PIT_Block {
                     ret.counter = (uint16_t)(cntr_cur - (index * (PIT_TICK_RATE / 1000.0)));
                 break;
             case 2:		/* Rate Generator */
-                ret.counter = (uint16_t)(cntr_cur - ((fmod(index,delay) / delay) * cntr_cur));
+                ret.counter = (uint16_t)(cntr_cur - ((pic_tickfmod(index,delay) / delay) * cntr_cur));
                 break;
             case 3:		/* Square Wave Rate Generator */
                 {
-                    double tmp = cycle_base ? fmod(index, (double)delay) * 2 : fmod(index, (double)delay);
+                    pic_tickindex_t tmp = pic_tickfmod(index,delay) * 2;
 
                     if (tmp < 0) {
-                        fprintf(stderr,"tmp %.9f index %.9f delay %.9f now %.3f start %.3f\n",tmp,index,delay,now,start);
+                        fprintf(stderr,"tmp %.9f index %.9f delay %.9f now %.3f start %.3f\n",(double)tmp,(double)index,(double)delay,(double)now,(double)start);
                         abort();
                     }
 
@@ -310,21 +310,31 @@ unsigned long PIT_TICK_RATE = PIT_TICK_RATE_IBM;
 
 static void PIT0_Event(Bitu /*val*/) {
 	PIC_ActivateIRQ(0);
-	if (pit[0].mode != 0) {
+	/* NTS: "Days of Thunder" leaves PIT 0 in mode 1 for some reason, which triggers once and then stops. "start" does not advance in that mode.
+	 *      For any non-periodic mode, this code would falsely detect an ever increasing error and act badly. */
+	if (pit[0].mode == 2 || pit[0].mode == 3) {
 		pit[0].track_time(PIC_FullIndex());
 
-        /* event timing error checking */
-        double err = PIC_GetCurrentEventTime() - pit[0].start;
-
-        if (err >= (pit[0].delay/2))
-            err -=  pit[0].delay;
+		/* event timing error checking */
+		pic_tickindex_t err = PIC_GetCurrentEventTime() - pit[0].start;
 
 #if 0//change if debug information wanted
-        if (fabs(err) >= (0.5 / CPU_CycleMax))
-            LOG_MSG("PIT0_Event timing error %.6fms",err);
+		if (fabs(err) >= (0.5 / CPU_CycleMax))
+			LOG_MSG("PIT0_Event timing error %.6fms for delay %.6fms now %.6fms start %.6fms mode %u",
+				(double)err,(double)pit[0].delay,(double)PIC_GetCurrentEventTime(),(double)pit[0].start,pit[0].mode);
 #endif
 
-        PIC_AddEvent(PIT0_Event,pit[0].delay - (err * 0.05));
+		pic_tickindex_t finaldelay = pit[0].delay - (err * 0.05);
+
+		if (finaldelay <= 0) { /* do not emit delays of zero */
+			// Uncomment this line below if you need to debug negative delays
+			//LOG_MSG("PIT0_Event delay value negative (%.6fms), reset to 0", (double)finaldelay);
+
+			// speed it up!
+			finaldelay = pit[0].delay * 0.95;
+		}
+
+		PIC_AddEvent(PIT0_Event,finaldelay);
 	}
 }
 
@@ -336,7 +346,7 @@ static bool counter_output(Bitu counter) {
 	PIT_Block *p = &pit[counter];
     p->track_time(PIC_FullIndex());
 
-    PIT_Block::read_counter_result res = p->read_counter();
+    PIT_Block::read_counter_result res = p->last_counter = p->read_counter();
     p->update_output_from_counter(res);
 
     return p->output;
@@ -373,7 +383,7 @@ static void counter_latch(Bitu counter,bool do_latch=true) {
 
     p->track_time(PIC_FullIndex());
 
-    PIT_Block::read_counter_result res = p->read_counter();
+    PIT_Block::read_counter_result res = p->last_counter = p->read_counter();
     p->update_output_from_counter(res);
 
     if (do_latch) {
@@ -393,7 +403,7 @@ void TIMER_IRQ0Poll(void) {
 
 pic_tickindex_t speaker_pit_delta(void) {
     unsigned int speaker_pit = IS_PC98_ARCH ? 1 : 2;
-    return fmod(pit[speaker_pit].now - pit[speaker_pit].start, pit[speaker_pit].delay);
+    return pic_tickfmod(pit[speaker_pit].now - pit[speaker_pit].start, pit[speaker_pit].delay);
 }
 
 void speaker_pit_update(void) {
@@ -410,26 +420,60 @@ bool TIMER2_ClockGateEnabled(void) {
     return !pit[IS_PC98_ARCH ? 1 : 2].new_mode;
 }
 
+// 8254 real hardware notes:
+// True to Intel documentation, mode 0 halts the count upon writing the mode byte, and it also
+// halts the count when given the first byte of a 16-bit count written to the timer. Reading
+// the counter during this state does not start it. Writing the mode byte again does not start
+// it. Twiddling the BCD bit back and forth (1996, Pyromania demoscene entry) does nothing.
+//
+// NOTES, 1996 demoscene entry "Pyromania":
+// - At the start of the credits section (animation followed by credits), the demo will hang
+//   and not continue. This is caused by misprogramming the 8254 PIT 0 in a way that causes
+//   all IRQ 0 timer interrupts to cease. The demo appears to write the mode 0 interval as
+//   expected, but then writes the first byte again (that's a total of 3 bytes). That leaves
+//   the 8254 in the halted case waiting for the other byte. The demo also uses a delay loop
+//   that uses a combined call to INT 1Ah to read BIOS_TIMER and the high byte of the counter
+//   value to wait a specific period of time. However in this state the timer counter is not
+//   ticking, and the lack of IRQ 0 means the IRQ 0 interrupt handler is not there to increment
+//   BIOS_TIMER, therefore nothing happens. Also noted is that the demo, for whatever reason,
+//   sets the mode byte twice, once normally, and then again with the BCD mode set. Therefore,
+//   emulation is correct that the demo will hang at that point and the hang is not DOSBox-X's
+//   fault.
+//
+//   This is either the result of extremely sloppy code that happened to work on the democoder's
+//   machine (non-Intel hardware that minimally implements a 8254?) or perhaps a race condition
+//   between the program and it's own IRQ 0 interrupt.
+//
+//   Additional notes from testing: It is indeed some sort of race condition. There is code to
+//   set PIT 0 to mode 2 counter 0 momentarily before going back to mode 0. Interrupts are
+//   enabled at that point, which may be interrupted at that key point.
+//
+//   Additional notes: Indeed, the problem is that a flaw in this code at the time acted upon
+//   the demo's programming of PIT 0 mode 2 counter == 0 momentarily, then switching back to
+//   mode 0. When the demo wrote the first byte of the 16-bit count, an interrupt occurred
+//   immediately, and the IRQ wrote the count in the middle, then returned for the code to
+//   write the second byte. This race condition confused the 8254. Fixing the code not to do
+//   that fixes the demo crash.
 static void write_latch(Bitu port,Bitu val,Bitu /*iolen*/) {
 //LOG(LOG_PIT,LOG_ERROR)("port %X write:%X state:%X",port,val,pit[port-0x40].write_state);
 
-    // HACK: Port translation for this code PC-98 mode.
-    //       0x71,0x73,0x75,0x77 => 0x40-0x43
-    if (IS_PC98_ARCH) {
-        if (port >= 0x3FD9)
-            port = ((port - 0x3FD9) >> 1) + 0x40;
-        else if (port >=0x71 && port <= 0x75)
-            port = ((port - 0x71) >> 1) + 0x40;
-        else {
-            E_Exit("PIT: PC-98 port in write_latch is out of range.");
-            return;
-        }
-    }
+	// HACK: Port translation for this code PC-98 mode.
+	//       0x71,0x73,0x75,0x77 => 0x40-0x43
+	if (IS_PC98_ARCH) {
+		if (port >= 0x3FD9)
+			port = ((port - 0x3FD9) >> 1) + 0x40;
+		else if (port >=0x71 && port <= 0x75)
+			port = ((port - 0x71) >> 1) + 0x40;
+		else {
+			E_Exit("PIT: PC-98 port in write_latch is out of range.");
+			return;
+		}
+	}
 
 	Bitu counter=port-0x40;
 	PIT_Block * p=&pit[counter];
 	if(p->bcd == true) BIN2BCD(p->write_latch);
-   
+
 	switch (p->write_state) {
 		case 0:
 			p->write_latch = p->write_latch | ((val & 0xff) << 8);
@@ -438,117 +482,128 @@ static void write_latch(Bitu port,Bitu val,Bitu /*iolen*/) {
 		case 3:
 			p->write_latch = val & 0xff;
 			p->write_state = 0;
+			if (p->mode == 0) counter_latch(counter,false);
 			break;
 		case 1:
 			p->write_latch = val & 0xff;
 			break;
 		case 2:
 			p->write_latch = (val & 0xff) << 8;
-		break;
+			break;
 	}
 	if (p->bcd==true) BCD2BIN(p->write_latch);
-   	if (p->write_state != 0) {
-        Bitu old_cntr = p->cntr;
+	if (p->write_state != 0) {
+		Bitu old_cntr = p->cntr;
 
-        p->track_time(PIC_FullIndex());
+		// Intel 8254 datasheet says the counter output latch holds the count
+		// until it is read or *the counter is reprogrammed*. This counts as
+		// reprogramming the counter. Therefore...
+		p->go_read_latch = true;
+		p->counting = true;
 
-        if (p->write_latch == 0) {
-            if (p->bcd == false)
-                p->set_next_counter(0x10000);
-            else
-                p->set_next_counter(9999/*check this*/);
-        }
-        else if (p->write_latch == 1 && p->mode == 3/*square wave, count by 2*/) { /* counter==1 and mode==3 makes a low frequency buzz (Paratrooper) */
-            if (p->bcd == false)
-                p->set_next_counter(0x10001);
-            else
-                p->set_next_counter(10000/*check this*/);
-        }
-        else {
-            p->set_next_counter(p->write_latch);
-        }
+		p->track_time(PIC_FullIndex());
 
-        if (!p->new_mode) {
-            if ((p->mode == 2/*common IBM PC mode*/ || p->mode == 3/*common PC-98 mode*/) && (counter == 0)) {
-                // In mode 2 writing another value has no direct effect on the count
-                // until the old one has run out. This might apply to other modes too.
-                // This is not fixed for PIT2 yet!!
-                p->update_count=true;
-                return;
-            }
-            else if ((p->mode == 3) && (counter == (IS_PC98_ARCH ? 1 : 2))) {
-                void PCSPEAKER_SetCounter_NoNewMode(Bitu cntr);
+		if (p->write_latch == 0) {
+			if (p->bcd == false)
+				p->set_next_counter(0x10000);
+			else
+				p->set_next_counter(9999/*check this*/);
+		}
+		else if (p->write_latch == 1 && p->mode == 3/*square wave, count by 2*/) { /* counter==1 and mode==3 makes a low frequency buzz (Paratrooper) */
+			if (p->bcd == false)
+				p->set_next_counter(0x10001);
+			else
+				p->set_next_counter(10000/*check this*/);
+		}
+		else {
+			p->set_next_counter(p->write_latch);
+		}
 
-                // PC speaker
-                PCSPEAKER_SetCounter_NoNewMode(p->cntr);
-                p->update_count=true;
-                return;
-            }
+		if (p->new_mode || p->mode == 0) {
+			p->reset_count_at(PIC_FullIndex());
+			p->latch_next_counter();
 
-            if (p->mode == 0) {
-                /* Mode 0 is the only mode NOT to wait for the current counter to finish if you write another counter value
-                 * according to the Intel 8254 datasheet.
-                 *
-                 * For timer 0 (system timer) this is used by DoWhackaDo as a sort of one-shot timer interrupt.
-                 * For timer 2 (PC speaker) this is used to do PWM "realsound" digitized speech in some games. */
-            }
-            else {
-                // this debug message will help development trace down cases where writing without a new mode
-                // would incorrectly restart the counter instead of letting the current count complete before
-                // writing a new one.
-                LOG(LOG_PIT,LOG_NORMAL)("WARNING: Writing counter %u in mode %u without writing port 43h not yet supported, will be handled as if new mode and reset of the cycle",(int)counter,(int)p->mode);
-            }
-        }
+			if (counter == 0) {
+				PIC_RemoveEvents(PIT0_Event);
+				PIC_AddEvent(PIT0_Event,p->delay);
+			}
+		}
+		else {
+			if ((p->mode == 2/*common IBM PC mode*/ || p->mode == 3/*common PC-98 mode*/) && (counter == 0)) {
+				// In mode 2 writing another value has no direct effect on the count
+				// until the old one has run out. This might apply to other modes too.
+				// This is not fixed for PIT2 yet!!
+				p->update_count=true;
+				return;
+			}
+			else if ((p->mode == 3) && (counter == (IS_PC98_ARCH ? 1 : 2))) {
+				void PCSPEAKER_SetCounter_NoNewMode(Bitu cntr);
 
-        p->reset_count_at(PIC_FullIndex());
-        p->latch_next_counter();
+				// PC speaker
+				PCSPEAKER_SetCounter_NoNewMode(p->cntr);
+				p->update_count=true;
+				return;
+			}
+
+			if (p->mode == 0) {
+				/* Mode 0 is the only mode NOT to wait for the current counter to finish if you write another counter value
+				 * according to the Intel 8254 datasheet.
+				 *
+				 * For timer 0 (system timer) this is used by DoWhackaDo as a sort of one-shot timer interrupt.
+				 * For timer 2 (PC speaker) this is used to do PWM "realsound" digitized speech in some games. */
+			}
+			else {
+				// this debug message will help development trace down cases where writing without a new mode
+				// would incorrectly restart the counter instead of letting the current count complete before
+				// writing a new one.
+				LOG(LOG_PIT,LOG_NORMAL)("WARNING: Writing counter %u in mode %u without writing port 43h not yet supported, will be handled as if new mode and reset of the cycle",(int)counter,(int)p->mode);
+			}
+		}
+
 
 		p->new_mode=false;
 		switch (counter) {
-		case 0x00:			/* Timer hooked to IRQ 0 */
-            PIC_RemoveEvents(PIT0_Event);
-            PIC_AddEvent(PIT0_Event,p->delay);
-
+			case 0x00:			/* Timer hooked to IRQ 0 */
 #if 0//change to #if 1 if you want to debug Mode 0 one-shot events
-            if (p->mode == 0)
-                LOG(LOG_PIT,LOG_NORMAL)("PIT 0 Timer one-shot event %.3fms",p->delay);
+				if (p->mode == 0)
+					LOG(LOG_PIT,LOG_NORMAL)("PIT 0 Timer one-shot event %.3fms",p->delay);
 #endif
 
-            //please do not spam the log and console if a game is writing the SAME counter value constantly,
-            //and do not spam the console if Mode 0 is used because events are not consistent.
-            if (p->cntr != old_cntr && p->mode != 0)
-                LOG(LOG_PIT,LOG_NORMAL)("PIT 0 Timer at %.4f Hz mode %d",1000.0/p->delay,p->mode);
+				//please do not spam the log and console if a game is writing the SAME counter value constantly,
+				//and do not spam the console if Mode 0 is used because events are not consistent.
+				if (p->cntr != old_cntr && p->mode != 0)
+					LOG(LOG_PIT,LOG_NORMAL)("PIT 0 Timer at %.4f Hz mode %d",(double)(1000.0/p->delay),p->mode);
 
-            break;
-        case 0x01:          /* Timer hooked to PC-Speaker (NEC-PC98) */
-            if (IS_PC98_ARCH)
-                PCSPEAKER_SetCounter(p->cntr,p->mode);
-            break;
-        case 0x02:			/* Timer hooked to PC-Speaker (IBM PC) */
-            if (!IS_PC98_ARCH)
-                PCSPEAKER_SetCounter(p->cntr,p->mode);
-            break;
-        default:
-			LOG(LOG_PIT,LOG_ERROR)("PIT:Illegal timer selected for writing");
+				break;
+			case 0x01:          /* Timer hooked to PC-Speaker (NEC-PC98) */
+				if (IS_PC98_ARCH)
+					PCSPEAKER_SetCounter(p->cntr,p->mode);
+				break;
+			case 0x02:			/* Timer hooked to PC-Speaker (IBM PC) */
+				if (!IS_PC98_ARCH)
+					PCSPEAKER_SetCounter(p->cntr,p->mode);
+				break;
+			default:
+				LOG(LOG_PIT,LOG_ERROR)("PIT:Illegal timer selected for writing");
 		}
-    }
-    else { /* write state == 0 */
-        /* If a new count is written to the Counter, it will be
-         * loaded on the next CLK pulse and counting will con-
-         * tinue from the new count. If a two-byte count is writ-
-         * ten, the following happens:
-         * 1) Writing the first byte disables counting. OUT is set
-         * low immediately (no clock pulse required)
-         * 2) Writing the second byte allows the new count to
-         * be loaded on the next CLK pulse. */
-        if (p->mode == 0) {
-            if (counter == 0) {
-                PIC_RemoveEvents(PIT0_Event);
-                PIC_DeActivateIRQ(0);
-            }
-            p->update_count = false;
-        }
-    }
+	}
+	else { /* write state == 0 */
+		/* If a new count is written to the Counter, it will be
+		 * loaded on the next CLK pulse and counting will con-
+		 * tinue from the new count. If a two-byte count is writ-
+		 * ten, the following happens:
+		 * 1) Writing the first byte disables counting. OUT is set
+		 * low immediately (no clock pulse required)
+		 * 2) Writing the second byte allows the new count to
+		 * be loaded on the next CLK pulse. */
+		if (p->mode == 0) {
+			if (counter == 0) {
+				PIC_RemoveEvents(PIT0_Event);
+				PIC_DeActivateIRQ(0);
+			}
+			p->update_count = false;
+		}
+	}
 }
 
 static Bitu read_latch(Bitu port,Bitu /*iolen*/) {
@@ -574,7 +629,7 @@ static Bitu read_latch(Bitu port,Bitu /*iolen*/) {
 		latched_timerstatus_locked = false;
 		ret = latched_timerstatus;
 	} else {
-		if (pit[counter].go_read_latch == true) 
+		if (pit[counter].go_read_latch == true)
 			counter_latch(counter);
 
 		if( pit[counter].bcd == true) BIN2BCD(pit[counter].read_latch);
@@ -617,10 +672,33 @@ static void write_p43(Bitu /*port*/,Bitu val,Bitu /*iolen*/) {
 			/* Counter latch command */
 			counter_latch(latch);
 		} else {
-			// save output status to be used with timer 0 irq
-			bool old_output = counter_output(0);
+			// NTS: Do not latch counter here. Some DOS games rely on latching a counter,
+			//      setting a control word, then reading the latched value later.
+			//
+			//      Calling reset_count_at() and latching here will cause Lemmings to program a
+			//      very high interrupt rate and hang. Lemmings appears to do a mode == 0
+			//      timer count down from 0xFFFF, set the control word to latch PIT 0,
+			//      then program mode == 2, then read back the latched value, then
+			//      NOT the value and program it with mode == 2 into the counter of PIT 0
+			//      as the tick rate. reset_count_at() after latch causes Lemmings to read back
+			//      0xFFFC, which when NOT'd and written back, becomes 0x0003, and therefore
+			//      a very high tick rate that prevents it from working.
+			//
+			//      Because of this latching across control words behavior, this code must
+			//      not set the go_read_latch flag either.
+			//
+			//      Intel 8254 PIT datasheet:
+			//
+			//      "The selected Counter's output latch (OL) latches the count at the time the
+			//      Counter Latch Command is received. The count is held in the latch until it is
+			//      read by the CPU (or until the Counter is reprogrammed). The count is then
+			//      unlatched automatically and the OL returns to "following" the counting element (CE)".
+			//
+			//      So the datasheet, and the behavior of Lemmings, confirms that the latch stays
+			//      in effect even if you write the control word.
+
 			// save the current count value to be re-used in undocumented newmode
-			counter_latch(latch);
+			counter_latch(latch,false); /* update counter but do not affect held counter if latched by program */
 			pit[latch].bcd = (val&1)>0;   
 			if (val & 1) {
 				if(pit[latch].cntr>=9999) pit[latch].cntr=9999;
@@ -631,8 +709,8 @@ static void write_p43(Bitu /*port*/,Bitu val,Bitu /*iolen*/) {
 				pit[latch].counterstatus_set=false;
 				latched_timerstatus_locked=false;
 			}
-//			pit[latch].reset_count_at(PIC_FullIndex()); // for undocumented newmode
-			pit[latch].go_read_latch = true;
+			// Do not call reset_count_at() here, it causes problems.
+			// When the mode byte is written, count stops. When the new count is written, THEN call reset_count_at()
 			pit[latch].update_count = false;
 			pit[latch].counting = false;
 			pit[latch].read_state  = (val >> 4) & 0x03;
@@ -651,12 +729,12 @@ static void write_p43(Bitu /*port*/,Bitu val,Bitu /*iolen*/) {
 			 * counter_output tells if the current counter is high or low 
 			 * So actually a mode 3 timer enables and disables irq al the time. (not handled) */
 
-            /* Jon C: Oh yeah? Nobody abuses counter == 0 on IBM PC that way, but there is a PC-98
-             *        game that relies on that behavior: Steel Gun Nyan! */
+			/* Jon C: Oh yeah? Nobody abuses counter == 0 on IBM PC that way, but there is a PC-98
+			 *        game that relies on that behavior: Steel Gun Nyan! */
 
 			if (latch == 0) {
 				PIC_RemoveEvents(PIT0_Event);
-				if((mode != 0)&& !old_output) {
+				if((mode != 0)&& (pit[latch].reltime() > pit[latch].delay)) {
 					PIC_ActivateIRQ(0);
 				} else {
 					PIC_DeActivateIRQ(0);
@@ -665,10 +743,10 @@ static void write_p43(Bitu /*port*/,Bitu val,Bitu /*iolen*/) {
 			pit[latch].new_mode = true;
 			if (latch == (IS_PC98_ARCH ? 1 : 2)) {
 				// notify pc speaker code that the control word was written.
-                // until a counter value is written, the PC speaker should
-                // treat the timer as if the clock gate were disabled.
-                PCSPEAKER_UpdateType();
-                PCSPEAKER_SetPITControl(mode);
+				// until a counter value is written, the PC speaker should
+				// treat the timer as if the clock gate were disabled.
+				PCSPEAKER_UpdateType();
+				PCSPEAKER_SetPITControl(mode);
 			}
 		}
 		break;

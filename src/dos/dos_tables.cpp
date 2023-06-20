@@ -27,14 +27,14 @@
 #include "render.h"
 #include <assert.h>
 
-extern bool gbk;
 extern int maxfcb;
+extern bool gbk, chinasea;
 extern Bitu DOS_PRIVATE_SEGMENT_Size;
 #if defined(USE_TTF)
 extern bool ttf_dosv;
 #endif
 
-void CALLBACK_DeAllocate(Bitu in);
+void CALLBACK_DeAllocate(Bitu in), makestdcp950table(), makeseacp951table();
 
 std::list<DOS_GetMemLog_Entry> DOS_GetMemLog;
 
@@ -174,7 +174,7 @@ static Bitu DOS_CaseMapFunc(void) {
 
 static uint8_t country_info[0x22] = {
 /* Date format      */  0x00, 0x00,
-/* Currencystring   */  0x24, 0x00, 0x00, 0x00, 0x00,
+/* Currency string  */  0x24, 0x00, 0x00, 0x00, 0x00,
 /* Thousands sep    */  0x2c, 0x00,
 /* Decimal sep      */  0x2e, 0x00,
 /* Date sep         */  0x2d, 0x00,
@@ -184,13 +184,13 @@ static uint8_t country_info[0x22] = {
 /* Time format      */  0x00,
 /* Casemap          */  0x00, 0x00, 0x00, 0x00,
 /* Data sep         */  0x2c, 0x00,
-/* Reservered 5     */  0x00, 0x00, 0x00, 0x00, 0x00,
-/* Reservered 5     */  0x00, 0x00, 0x00, 0x00, 0x00
+/* Reserved 5       */  0x00, 0x00, 0x00, 0x00, 0x00,
+/* Reserved 5       */  0x00, 0x00, 0x00, 0x00, 0x00
 };
 
 static uint8_t country_info_pc98[0x22] = {
 /* Date format      */  0x02, 0x00,
-/* Currencystring   */  0x5C, 0x00, 0x00, 0x00, 0x00,
+/* Currency string  */  0x5C, 0x00, 0x00, 0x00, 0x00,
 /* Thousands sep    */  0x2c, 0x00,
 /* Decimal sep      */  0x2e, 0x00,
 /* Date sep         */  0x2d, 0x00,
@@ -200,8 +200,8 @@ static uint8_t country_info_pc98[0x22] = {
 /* Time format      */  0x01,
 /* Casemap          */  0x00, 0x00, 0x00, 0x00,
 /* Data sep         */  0x2c, 0x00,
-/* Reservered 5     */  0x00, 0x00, 0x00, 0x00, 0x00,
-/* Reservered 5     */  0x00, 0x00, 0x00, 0x00, 0x00
+/* Reserved 5       */  0x00, 0x00, 0x00, 0x00, 0x00,
+/* Reserved 5       */  0x00, 0x00, 0x00, 0x00, 0x00
 };
 
 extern bool enable_dbcs_tables;
@@ -216,6 +216,8 @@ PhysPt DOS_Get_DPB(unsigned int dos_drive) {
 }
 
 void SetupDBCSTable() {
+    if (dos.loaded_codepage==950&&!chinasea) makestdcp950table();
+    else if (dos.loaded_codepage==951&&chinasea) makeseacp951table();
     if (enable_dbcs_tables) {
         if (!dos.tables.dbcs) dos.tables.dbcs=RealMake(DOS_GetMemory(12,"dos.tables.dbcs"),0);
 
@@ -265,7 +267,7 @@ void DOS_SetupTables(void) {
 	DOS_SDA(DOS_SDA_SEG,0).Init();
 
 	/* Some weird files >20 detection routine */
-	/* Possibly obselete when SFT is properly handled */
+	/* Possibly obsolete when SFT is properly handled */
 	real_writed(DOS_CONSTRING_SEG,0x0a,0x204e4f43);
 	real_writed(DOS_CONSTRING_SEG,0x1a,0x204e4f43);
 	real_writed(DOS_CONSTRING_SEG,0x2a,0x204e4f43);
@@ -326,6 +328,7 @@ void DOS_SetupTables(void) {
 	dos_infoblock.SetCurDirStruct(RealMake(seg,0));
 
     /* Allocate DBCS DOUBLE BYTE CHARACTER SET LEAD-BYTE TABLE */
+    dos.tables.dbcs = 0;
     SetupDBCSTable();
 
 	/* FILENAME CHARACTER TABLE */
@@ -427,6 +430,17 @@ void DOS_SetupTables(void) {
         host_writed(country_info + 0x12, CALLBACK_RealPointer(call_casemap));
         dos.tables.country=country_info;
     }
+
+    /* Windows 95 FORMAT.COM does not use INT 21h to determine the boot drive. It uses
+     * the List of Lists and reads it directly from this infoblock. This value matches
+     * the hardcoded "C" drive the INT 21h emulation returns.
+     *
+     * No error checking of any kind is done by FORMAT.COM either, so if this value is
+     * zero, it will try to query for "@:\\WINBOOT.SYS" which of course does not exist.
+     *
+     * I'm given the impression from DOS_FindDevice() that someone probably ran into
+     * "@:" paths and did not understand this problem, which is fair enough. */
+    dos_infoblock.SetBootDrive(3); /* Drive C: (TODO: Make configurable, or else initially set to Z: then re-set to the first drive mounted */
 
     /* PC-98 INT 1Bh device list (60:6Ch-7Bh).
      * For now, just write a fake list to satisfy any PC-98 game that

@@ -49,6 +49,7 @@ int inet_pton_win(int af, const char* src, void* dst)
 #endif /* _WIN32_WINNT */
 #else /* !WIN32 */
 #include <arpa/inet.h>
+#include <sys/socket.h>
 #endif /* WIN32 */
 
 /* Begin boilerplate to map libslirp's C-based callbacks to our C++
@@ -214,7 +215,7 @@ void SlirpEthernetConnection::ClearPortForwards(const bool is_udp, std::map<int,
 		if (slirp_remove_hostfwd(slirp, is_udp, host_addr, host_port) >= 0)
 			LOG_MSG("SLIRP: Removed old %s port %d:%d forward", protocol, host_port, guest_port);
 		else
-			LOG_MSG("SLIRP: Failed removing old %s port %d:%d foward", protocol, host_port, guest_port);
+			LOG_MSG("SLIRP: Failed removing old %s port %d:%d forward", protocol, host_port, guest_port);
 
 	existing_port_forwards.clear();
 }

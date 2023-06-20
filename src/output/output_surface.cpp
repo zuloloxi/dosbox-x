@@ -9,16 +9,37 @@
 #include "render.h"
 #include "vga.h"
 
+#include <output/output_tools.h>
+#include <output/output_tools_xbrz.h>
+
 using namespace std;
+
+extern Bitu frames;
+extern Bitu userResizeWindowWidth;
+extern Bitu userResizeWindowHeight;
+extern Bitu currentWindowWidth;
+extern Bitu currentWindowHeight;
 
 bool setSizeButNotResize();
 
 // output API below
 
+#if defined(C_X11) && defined(LINUX)
+void X11_ErrorHandlerInstall(void);
+
 void OUTPUT_SURFACE_Initialize()
 {
-    // nothing to initialize (yet?)
+    // Apparently if the window size changes rapidly enough, SDL2 can be tricked into
+    // blitting the wrong dimensions to the window and trigger an X11 BadValue error.
+    // Set up an error handler that prints the error to STDERR and then returns,
+    // instead of the default handler which prints an error and exit()s this program.
+    X11_ErrorHandlerInstall();
 }
+#else
+void OUTPUT_SURFACE_Initialize()
+{
+}
+#endif
 
 void OUTPUT_SURFACE_Select()
 {
@@ -165,6 +186,8 @@ Bitu OUTPUT_SURFACE_SetSize()
              * This is a way to prevent that! */
             SDL_SetWindowMinimumSize(sdl.window, sdl.clip.x+sdl.clip.w, sdl.clip.y+sdl.clip.h);
             sdl.window = GFX_SetSDLWindowMode(sdl.clip.x+sdl.clip.w, sdl.clip.y+sdl.clip.h, SCREEN_SURFACE);
+            if (sdl.window == NULL)
+                E_Exit("Could not set windowed video mode %ix%i: %s", (int)sdl.draw.width, (int)sdl.draw.height, SDL_GetError());
         }
     }
     sdl.surface = SDL_GetWindowSurface(sdl.window);
@@ -200,14 +223,18 @@ Bitu OUTPUT_SURFACE_SetSize()
 #endif
 
     /* WARNING: If the user is resizing our window to smaller than what we want, SDL2 will give us a
-     *          window surface according to the smaller size, and then we crash! */
-    assert(sdl.surface->w >= (sdl.clip.x+sdl.clip.w));
-    assert(sdl.surface->h >= (sdl.clip.y+sdl.clip.h));
+     *          window surface according to the smaller size, and then we crash!
+     *
+     *          To avoid this crash, disable rendering until the window is big enough again. */
+    if (sdl.surface->w < (sdl.clip.x+sdl.clip.w) || sdl.surface->h < (sdl.clip.y+sdl.clip.h))
+        sdl.window_too_small = true;
+    else
+        sdl.window_too_small = false;
 
     sdl.deferred_resize = false;
     sdl.must_redraw_all = true;
 
-    /* Fix a glitch with aspect=true occuring when
+    /* Fix a glitch with aspect=true occurring when
     changing between modes with different dimensions */
     SDL_FillRect(sdl.surface, NULL, SDL_MapRGB(sdl.surface->format, 0, 0, 0));
 #if DOSBOXMENU_TYPE == DOSBOXMENU_SDLDRAW

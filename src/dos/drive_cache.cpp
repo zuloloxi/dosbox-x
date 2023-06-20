@@ -40,6 +40,9 @@
 #endif
 
 int fileInfoCounter = 0;
+extern bool gbk;
+char * DBCS_upcase(char * str);
+bool isDBCSCP(), shiftjis_lead_byte(int c), isKanji1_gbk(uint8_t chr), filename_not_8x3(const char *n), filename_not_strict_8x3(const char *n);
 
 bool SortByName(DOS_Drive_Cache::CFileInfo* const &a, DOS_Drive_Cache::CFileInfo* const &b) {
     return strcmp(a->shortname,b->shortname)<0;
@@ -135,7 +138,7 @@ void DOS_Drive_Cache::SetBaseDir(const char* baseDir, DOS_Drive *drive) {
     if (strlen(baseDir) == 0) return;
 
     uint16_t id;
-    strcpy(basePath,baseDir);
+    if (basePath != baseDir) strcpy(basePath,baseDir); /* NTS: pointer check because Valgrind says this was called with basePath == baseDir */
     this->drive = drive;
     if (OpenDir(baseDir,id)) {
         char* result = 0, *lresult = 0;
@@ -152,7 +155,7 @@ void DOS_Drive_Cache::SetBaseDir(const char* baseDir, DOS_Drive *drive) {
     UINT test = GetDriveType(drives);
     if(test == DRIVE_CDROM) cdrom = true;
 #else // OS2
-    //TODO determine wether cdrom or not!
+    //TODO determine whether cdrom or not!
     FSINFO fsinfo;
     ULONG drivenumber = drive[0];
     if (drivenumber > 26) { // drive letter was lowercase
@@ -195,9 +198,9 @@ char* DOS_Drive_Cache::GetExpandName(const char* path) {
         size_t len = strlen(work);
 #if defined (WIN32)
 //What about OS/2
-        if((work[len-1] == CROSS_FILESPLIT ) && (len >= 2) && (work[len-2] != ':')) {
+		if(check_last_split_char(work, len, CROSS_FILESPLIT) && (len >= 2) && (work[len-2] != ':')) {
 #else
-        if((len > 1) && (work[len-1] == CROSS_FILESPLIT )) {
+		if((len > 1) && check_last_split_char(work, len, CROSS_FILESPLIT)) {
 #endif       
             work[len-1] = 0; // Remove trailing slashes except when in root
         }
@@ -238,7 +241,6 @@ void DOS_Drive_Cache::AddEntry(const char* path, bool checkExists) {
     }
 }
 
-bool filename_not_strict_8x3(const char *n);
 void DOS_Drive_Cache::AddEntryDirOverlay(const char* path, char *sfile, bool checkExists) {
   // Get Last part...
   char file   [CROSS_LEN];
@@ -531,28 +533,27 @@ Bits DOS_Drive_Cache::GetLongName(CFileInfo* curDir, char* shortName) {
     RemoveTrailingDot(shortName);
     // Search long name and return array number of element
     Bits res;
-    if (!uselfn) {
-        Bits low	= 0;
-        Bits high	= (Bits)(filelist_size-1);
-        Bits mid;
-        while (low<=high) {
-            mid = (low+high)/2;
-            res = strcmp(shortName,curDir->fileList[mid]->shortname);
-            if (res>0)	low  = mid+1; else
-            if (res<0)	high = mid-1; else
-            {	// Found
-                strcpy(shortName,curDir->fileList[mid]->orgname);
-                return mid;
-            };
-        }
-    } else if (strlen(shortName)) {
-        for (Bitu i=0; i<filelist_size; i++) {
-            if (!strcasecmp(shortName,curDir->fileList[i]->orgname) || !strcasecmp(shortName,curDir->fileList[i]->shortname)) {
-                strcpy(shortName,curDir->fileList[i]->orgname);
-                return (Bits)i;
-            }
-        }
-    }
+	Bits low	= 0;
+	Bits high	= (Bits)(filelist_size-1);
+	Bits mid;
+	while (low<=high) {
+		mid = (low+high)/2;
+		res = strcmp(shortName,curDir->fileList[mid]->shortname);
+		if (res>0)	low  = mid+1; else
+		if (res<0)	high = mid-1; else
+		{	// Found
+			strcpy(shortName,curDir->fileList[mid]->orgname);
+			return mid;
+		};
+	}
+	if (uselfn && strlen(shortName)) {
+		for (Bitu i=0; i<filelist_size; i++) {
+			if (!strcasecmp(shortName,curDir->fileList[i]->orgname)) {
+				strcpy(shortName,curDir->fileList[i]->orgname);
+				return (Bits)i;
+		    }
+		}
+	}
 
 #ifdef WINE_DRIVE_SUPPORT
     if (strlen(shortName) < 8 || shortName[4] != '~' || shortName[5] == '.' || shortName[6] == '.' || shortName[7] == '.') return -1; // not available
@@ -584,9 +585,6 @@ bool DOS_Drive_Cache::RemoveSpaces(char* str) {
     return (curpos!=chkpos);
 }
 
-bool isDBCSCP();
-char * DBCS_upcase(char * str);
-
 void DOS_Drive_Cache::CreateShortName(CFileInfo* curDir, CFileInfo* info) {
     Bits    len         = 0;
     bool    createShort = false;
@@ -608,7 +606,7 @@ void DOS_Drive_Cache::CreateShortName(CFileInfo* curDir, CFileInfo* info) {
     char* pos = strchr(tmpName,'.');
     if (pos) {
         // ignore preceding '.' if extension is longer than "3"
-        if (strlen(pos)>4) {
+        if (strlen(pos)>4 || (strlen(pos) == strlen(tmpName) && strcmp(tmpName, ".") && strcmp(tmpName, ".."))) {
             while (*tmpName=='.') tmpName++;
             createShort = true;
         }
@@ -617,6 +615,18 @@ void DOS_Drive_Cache::CreateShortName(CFileInfo* curDir, CFileInfo* info) {
         else        len = (Bits)strlen(tmpName);
     } else {
         len = (Bits)strlen(tmpName);
+    }
+
+    if (strcmp(tmpName, ".") && strcmp(tmpName, "..") && filename_not_8x3(tmpName)) {
+        createShort = true;
+        unsigned int i = 0;
+        bool lead = false;
+        while (tmpName[i] != 0) {
+                if ((tmpName[i]&0xFF)<=32||tmpName[i]==127||tmpName[i]=='"'||tmpName[i]=='+'||tmpName[i]=='='||tmpName[i]==','||tmpName[i]==';'||tmpName[i]==':'||tmpName[i]=='<'||tmpName[i]=='>'||((tmpName[i]=='['||tmpName[i]==']'||tmpName[i]=='|'||tmpName[i]=='\\')&&(!lead||((dos.loaded_codepage==936||IS_PDOSV)&&!gbk)))||tmpName[i]=='?'||tmpName[i]=='*') tmpName[i]='_';
+                if (lead) lead = false;
+                else if ((IS_PC98_ARCH && shiftjis_lead_byte(tmpName[i]&0xFF)) || (isDBCSCP() && isKanji1_gbk(tmpName[i]&0xFF))) lead = true;
+                i++;
+        }
     }
 
     // Should shortname version be created ?
@@ -636,7 +646,16 @@ void DOS_Drive_Cache::CreateShortName(CFileInfo* curDir, CFileInfo* info) {
         // Copy first letters
         Bits tocopy = 0;
         size_t buflen = strlen(buffer);
-        if ((size_t)len+buflen+1u>8u) tocopy = (Bits)(8u - buflen - 1u);
+        if ((size_t)len+buflen+1u>8u) {
+            tocopy = (Bits)(8u - buflen - 1u);
+            bool lead = false;
+            if (IS_PC98_ARCH || isDBCSCP())
+                for (int i=0; i<tocopy; i++) {
+                    if (lead) lead = false;
+                    else if ((IS_PC98_ARCH && shiftjis_lead_byte(tmpName[i]&0xFF)) || (isDBCSCP() && isKanji1_gbk(tmpName[i]&0xFF))) lead = true;
+                }
+            if (lead) tocopy--;
+        }
         else                          tocopy = len;
         safe_strncpy(info->shortname,tmpName,tocopy+1);
         // Copy number
@@ -757,15 +776,17 @@ DOS_Drive_Cache::CFileInfo* DOS_Drive_Cache::FindDirInfo(const char* path, char*
     } while (pos);
 
     // Save last result for faster access next time
-    strcpy(save_path,path);
-    strcpy(save_expanded,expandedPath);
-    save_dir = curDir;
+    if (strlen(expandedPath) < CROSS_LEN) {
+        strcpy(save_path,path);
+        strcpy(save_expanded,expandedPath);
+        save_dir = curDir;
+    }
 
     return curDir;
 }
 
 bool DOS_Drive_Cache::OpenDir(const char* path, uint16_t& id) {
-    char expand[CROSS_LEN] = {0};
+    char expand[CROSS_LEN + LFN_NAMELENGTH] = {0};
     CFileInfo* dir = FindDirInfo(path,expand);
     if (OpenDir(dir,expand,id)) {
         dirSearch[id]->nextEntry = 0;
@@ -775,6 +796,7 @@ bool DOS_Drive_Cache::OpenDir(const char* path, uint16_t& id) {
 }
 
 bool DOS_Drive_Cache::OpenDir(CFileInfo* dir, const char* expand, uint16_t& id) {
+    if (strlen(expand)>=CROSS_LEN-1) return false;
     id = GetFreeID(dir);
     dirSearch[id] = dir;
     char expandcopy [CROSS_LEN];
@@ -853,7 +875,7 @@ void DOS_Drive_Cache::CopyEntry(CFileInfo* dir, CFileInfo* from) {
 }
 
 bool DOS_Drive_Cache::ReadDir(uint16_t id, char* &result, char * &lresult) {
-    // shouldnt happen...
+    // shouldn't happen...
     if (id>=MAX_OPENDIRS) return false;
 
     if (!IsCachedIn(dirSearch[id])) {

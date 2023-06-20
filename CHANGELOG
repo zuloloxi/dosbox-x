@@ -1,5 +1,1085 @@
-0.83.26
-  - 
+Next
+  - NE2000 macaddr default is now "random", which instructs the NE2000
+    hardware at startup to pick a random MAC address. (joncampbell123).
+  - IPX: If NE2000 and IPX are enabled, and an IPX tunneling connection is
+    active, and the user boots a guest OS, switch on a mode where all IPX
+    packets going to and coming from the guest are re-routed through the
+    IPX tunnel instead of to the NE2000 ethernet backend. This feature
+    makes it possible to play IPX-based games in a guest OS like MS-DOS
+    and Windows 95. (joncampbell123).
+  - IPX: Add extension to server to allow clients to register their own
+    MAC address instead of using the default MAC address given by their
+    IP address and port number. The extension is designed so that if DOSBox-X
+    is a client to another DOSBox fork's IPX tunneling server, it will
+    be ignored and DOSBox-X will get the usual MAC address instead. This
+    extension is required for guest OSes to be able to use the IPX protocol
+    through the NE2000 card given upcoming code changes as they normally
+    use the network card MAC address when picking an IPX address because
+    the IPX interface is not available once booted into a guest OS. (joncampbell123).
+  - IPX client: If both IPX and NE2000 emulation are enabled, IPX emulation
+    will use the NE2000 card's MAC address instead. It will use the IPX
+    server DOSBox-X extension to try. If it doesn't work, then the normal
+    MAC address assignment is accepted without complaint. (joncampbell123).
+  - NE2000: Add "nothing" backend. It receives nothing and send packets go
+    nowhere. If no other backend is available, this backend is a fallback
+    so that at least the NE2000 emulation can work. The other purpose of
+    a nothing callback is to give NE2000 something to talk to for those
+    who wish to use the upcoming IPX packet redirection to link DOS and
+    Windows games over the IPX client or server connection to other
+    instances of DOSBox. (joncampbell123)
+  - Added record function to capture NE2000 network traffic to a
+    pcap/Wireshark file in the capture directory. (joncampbell123)
+  - Fixed bug where guest VM reset causes the CMOS to stop ticking for
+    exactly the amount of time it was running before reset. (joncampbell123)
+  - Added alarm interrupt function to RTC CMOS emulation (joncampbell123)
+  - Reverted DOS to using the BIOS_DATA tick count for time and the cached
+    copy of date it keeps internally, rather than always calling INT 1Ah.
+    It turns out that is how DOS actually behaves, which is also why it is
+    possible for the DOS and CMOS RTC to diverge. Fix CMOS emulation to
+    allow get/set time and to run in emulation time, not real time, though
+    the clock starts from the host time. (joncampbell123)
+  - Fixed VHD disk image calculation of footer position and, thus, of newly
+    allocated block position. (maxpat78)
+  - Enhanced Dynamic and Differencing VHD support #4273 (maxpat78)
+  - Imported IBM Music Feature Card support from DOSBox Staging. (Allofich)
+2023.05.01
+  - IMGMAKE will choose LBA partition types for 2GB or larger disk
+    images, but the user can also use -chs and -lba options to override
+    that choice. The CHS or LBA partition types do matter because it
+    affects which version of INT 13h is used by Windows 98/ME to boot up
+    and, if drive C: is in compatibility mode, at all times. (joncampbell123)
+  - PC-98 256-color mode will also trigger the auto mode of "render on
+    demand" for performance reasons because per-scanline raster effects
+    are very unlikely in that case, as will MDA and Hercules machine
+    types. (joncampbell123)
+  - When the DOS IDLE API is enabled (by default), limit STI+HLT to
+    occur on INT 28h only once after any call to read the CON device
+    or call to BIOS INT 16h to read the keyboard. This fixes stalls
+    and sluggish input problems with programs that like to call INT 28h
+    often like the Pacific C compiler PPD IDE interface. (joncampbell123).
+  - Hercules InColor machine type: Fixed attribute and RAMFONT handling
+    of 48K RAMFONT mode and added planar text rendering. (joncampbell123).
+  - Write BIOS data area fields for number of rows, char height, etc.
+    for MCGA machine type in addition to EGA/VGA machine types because
+    IBM technical references suggest it's there for MCGA as well.
+    This also resolves an issue where with the MCGA machine type, INT 10h
+    failed to print any text to screen whatsoever. (joncampbell123).
+  - Render on demand (Staging calls it "lazy rendering") now defaults
+    to "auto" and allows an "auto" setting. The auto setting will
+    turn it off for standard VGA modes and will turn it on for SVGA
+    modes where per scanline raster effects are very unlikely to
+    occur. This may provide a performance boost for DOS games in SVGA
+    modes and the Windows desktop (joncampbell123).
+  - CGA 320x200 4-color mode is now rendered using the M_EGA render
+    code for EGA/VGA machine types to better reflect real hardware.
+    (joncampbell123).
+  - Fix bug where setting doublescan=false for anything other than
+    the VGA machine type would break CGA graphics modes.
+    (joncampbell123).
+  - Fix video debug overlay calculations of source video mode for
+    CGA graphics modes. (joncampbell123).
+  - CGA 640x200 2-color mode and MCGA 640x480 2-color mode are no
+    longer rendered as M_CGA2 for EGA/VGA machine types. The reason
+    is that at the hardware level they are really just IBM standard
+    tweaked versions of the EGA/VGA 16-color modes with additional
+    bits for the interleave emulation and can be properly emulated
+    with the M_EGA renderer. M_CGA2 is still used for the CGA and
+    MCGA machine types for those modes. The DCGA DOS/V mode has been
+    carefully made into it's own render mode instead of part of the
+    M_CGA2 case. (joncampbell123).
+  - Fixed refcount -1 error and abort when multiple floppies are
+    attached to a floppy drive and the "Swap floppy" mapper shortcut
+    is used at least once (joncampbell123).
+  - Hercules palette selection now provides a "dark gray" color
+    mapping to match the green, amber, or gray palette selection of
+    the user (joncampbell123)
+  - Fix Hercules vs MDA attribute handling of "dark gray" background
+    color when hardware blink is disabled. (joncampbell123)
+  - Added RAMFONT emulation to Hercules Plus machine type, fixed code
+    to allow Hercules Plus text mode to draw farther than the first 4KB
+    of RAM if RAMFONT enabled. (joncampbell123)
+  - DOS kernel: Fix programming mistake that allocated perhaps a bit
+    too much DOS kernel memory for the "List of Lists" info block.
+    Fix the sizes of the info block and other structures to make sure
+    specific kernel structures are placed at fixed addresses because
+    later Microsoft software for MS-DOS checks those values.
+    (joncampbell123)
+  - Serial port: Add multiplier: setting as requested to enable
+    faster than 115200 baud rates. (joncampbell123)
+  - Fix mistakes in CPUID emulation that threw a #UD exception for
+    specific cases where EAX was not recognized by particular CPU
+    types. (joncampbell123)
+  - Fix RTC clock emulation to correctly signal IRQ8 interrupt for
+    both periodic tick and update-ended events. Prior to this fix,
+    only periodic tick events were reported even if the bit was set
+    to enable update-ended. (joncampbell123)
+  - Fix serial and AUX PS/2 mouse emulation to not send relative
+    motion unless mouse captured, to make it consistent with the
+    BIOS PS/2 mouse emulation (joncampbell123)
+  - FAT driver: Major performance boost is possible by eliminating
+    unnecessary code that re-reads the entire directory when looking
+    up or changing one particular directory entry. (joncampbell123).
+  - CMOS registers: Fix code to allow getting and setting time,
+    fix year vs century registers to work properly. (joncampbell123).
+  - BIOS INT 1Ah: Fix functions to get and set time and date
+    instead of faking on read and ignoring set. Use the CMOS
+    registers. (joncampbell123).
+  - DOS INT 21h: Fix date and time functions to call the BIOS for
+    time instead of trying to fake it only at the DOS level. This
+    includes allowing INT 21h to change the date/time using the
+    BIOS. (joncampbell123).
+  - DOS shell: Make TIME actually use INT 21h to set time instead of
+    directly modifying the BIOS timer tick count in the BDA.
+    (joncampbell123).
+  - Increased PIC event queue size, there are corner cases especially
+    with Windows XP that can occasionally overrun the queue.
+    (joncampbell123).
+  - Updated IBM PC keyboard emulation to correctly encode Pause and
+    Print Screen key scan codes when shift, alt, and ctrl are held
+    down. This makes it possible to type "Alt+SysRq" for programs
+    that expect it, including SoftICE. (joncampbell123).
+  - NE2000 emulation: Looking at recent Bochs source code, ne2k.cc
+    appears to have downgraded the "IMR write, reserved bit set"
+    message from BX_PANIC to BX_ERROR. Update the same in DOSBox-X
+    so that Windows 2000 no longer crashes the emulator with E_Exit()
+    when probing the NE2000 hardware. (joncampbell123).
+  - INT 33h mouse services: Add "Get General Driver Information"
+    function for Microsoft Word 5.5 (joncampbell123).
+  - INT 33h mouse services: Render cursorType == 2 (graphics cursor)
+    as if text cursorType == 0 if the current mode is text mode.
+    Microsoft Word 5.5 always calls functions to set text AND graphics
+    cursor regardless of whether the actual mode is graphics or not.
+    This fix allows the cursor to show correctly as the block cursor
+    it wanted in text mode instead of a moving hardware blinking cursor.
+    (joncampbell123).
+  - Fixed S3 XGA emulation bitmap rendering to correctly handle
+    8/16/32-bit pixel transfer I/O and update comments to reflect
+    the 32-bit byte aligned transfer mode of the Trio chipset.
+    This fixes incorrectly drawn radio buttons and 16x16 icons
+    in Windows NT 3.5, Windows NT 3.51, Windows NT 4.0, and
+    Windows 2000. (joncampbell123).
+  - Fixed keyboard emulation so that upon the keyboard reset command
+    FFh, the keyboard does the reset process and THEN sends back
+    bytes 0xAA (power on/reset OK) and 0x00 (interface self-test).
+    This resolves the issue where Windows NT 3.1 pauses at startup and
+    does not resume booting until you press a key on the keyboard.
+    This also resolves the issue where Windows NT 3.5 keyboard and
+    mouse input stops working completely if you press a key on the
+    keyboard. (joncampbell123).
+  - Add Hercules InColor emulation of MDA vs CGA attribute select,
+    and make sure it obeys the blink setting (joncampbell123)
+  - Change Hercules/MDA text output to render 9 pixels per char
+    if the char9 setting is on, to match the 9x14 character cell
+    that those cards emit to the screen. The user can always turn
+    it back off to get the 8x14 text they're probably accustomed
+    to in other DOSBox forks. (joncampbell123)
+  - Render output fixed to never double pixels vertically on render
+    if the machine type is emulating VGA and the Doublescan option
+    is enabled, in order to help resolve SVGA text mode issues
+    reported by ThomasKjoernes (joncampbell123)
+  - Add InColor CRTC registers and add code to emulate the planar
+    bitplane operations. Microsoft Flight Simulator 3.0 renders
+    correctly now. (joncampbell123)
+  - Update Hercules InColor code to render the same 64-color EGA
+    palette as machine=ega. (joncampbell123)
+  - Correct machine=hercules text rendering flaw that prevented
+    the bright attribute (bit 3/7) from working, making all text
+    output the same normal brightness. (joncampbell123)
+  - Add expected data structures and signatures to VGA ROM BIOS at
+    C000:0000 if machine type selects ATI emulation (joncampbell123).
+  - Add ATI machine types, which at this time, is just a placeholder
+    for development to go in that direction over time for those
+    machine types. (joncampbell123)
+  - Added "machine=hercules_plus" and "machine=hercules_incolor" as
+    stubs to be developed on going forward to emulate the HGC+ and
+    InColor cards. Note that InColor will require the MCH_HERC case
+    to generate 64-color EGA-like output going forward even if the
+    documented stratup state still emulates the MDA-like monochrome
+    attributes. (joncampbell123)
+  - SDL2: Stop checking for compiler flags that make it an error to
+    declare variables after statements in a function or any other
+    terrible sins that would offend old C89 standard compilers.
+    DOSBox-X is never going to compile for a C standard that old.
+    Furthermore this check is preventing compilation on ARM-based
+    Macbooks for some reason, though not Intel based Macbooks.
+
+2023.03.31
+  - "mount -t overlay" will now print a message on the console to
+    let you know if the act of mounting the overlay replaced a
+    previous overlay mount. Overlay mounts cannot be stacked in
+    DOSBox-X (and probably most DOSBox forks that support overlays)
+    and the user should understand that. (joncampbell123).
+  - Remove kludges from DOS path resolution to handle drive paths
+    that refer to drive @ (at sign). Note that in ASCII the at sign
+    is one code below capital "A". Windows 95 FORMAT.COM due to
+    another issue was asking for "@:\WINBOOT.SYS" and sometimes
+    causing a segfault in DOS path resolution due to an uninitialized
+    drive index. The fix for the other issue removes the need for this
+    kludge. In it's place a message will be logged to your log file if
+    anything attempts to access files on drive "@:" because it likely
+    means a failure to determine the drive index properly. (joncampbell123).
+  - In addition to reporting the "boot drive" via INT 21h AX=3305h, also
+    write boot drive in the "List of Lists" structure. Windows 95
+    FORMAT.COM reads the boot drive from the LoL and does not do any
+    error checking if that value is out of range (such as if it was
+    never set and the byte value is zero). Failure to set this field
+    will result in FORMAT.COM attempting to access "@:\WINBOOT.SYS"
+    and "@:\IO.SYS" and failing. (joncampbell123).
+  - Add dosbox.conf option to set a fixed RTDSC tick rate to use at
+    all times during emulation instead of the CPU cycle count
+    (joncampbell123).
+  - Fix RDTSC to maintain a monotonic increasing count even if the
+    CPU cycles count changes, and better handle timestamp writes
+    through WRMSR (joncampbell123).
+  - FAT filesystem driver: Instead of searching from cluster 0 every
+    time a new cluster is to be allocated, keep track of the search
+    to help reduce slowdowns on fairly large filesystems when many
+    files are copied onto it (joncampbell123)
+  - Page Up/Down vs Roll Down/Up was in the wrong order, switch order
+    to correct it. (joncampbell123)
+  - Fix 'pc98 force ibm keyboard layout' was always forced to be 'true'
+    for left & right bracket keys on US keyboards. (maron2000)  
+  - Fix dynamic_nodhfpu FPU stack bugs, the same bugs that once plagued
+    dynrec. dynamic_x86 never seemed to have the same problem because
+    in reality the DH FPU case was normally used, to hit this bug you
+    had to use core=dynamic_nodhfpu. Also fix dynamic x86 DH FPU code
+    never to restore from DH case if the DH FPU code was never enabled,
+    which periodically caused FPU state to dissapear. (joncampbell123).
+  - Add dosbox.conf option to control the MSCDEX.EXE device name when
+    emulating a CD-ROM drive (joncampbell123).
+  - Wengier coded this nice text-only DOSBox-X logo for the TTF output.
+    Fix border alignment issues and make the text logo the default and
+    only option for MDA and Hercules machine types at boot.
+    (joncampbell123).
+  - Add -print-ticks command line option, which enables code to print
+    both SDL_GetTicks() and emulator time once a second to the console
+    and the log file. This may help in tracking down bugs related to
+    long term laptop suspend or suspension of the process in general.
+    (joncampbell123).
+  - PC-98: Ignore INT 18h AH=0Ch (enable text layer) in 256-color mode.
+    Real hardware doesn't seem to let you turn on the text layer in
+    256-color mode, though I am not certain if this is a restriction
+    imposed by the BIOS or by the hardware. This fixes possible cases
+    where Sim City 2000 in 256-color mode reveals garbage text data at
+    the bottom of the screen if it is there when it starts. This doesn't
+    fix the issue where Sim City 2000 cannot set 640x480 256-color mode
+    properly unless your display is already set to 31Khz hsync because that
+    is evidently a bug in the game, not DOSBox-X. (joncampbell123).
+  - PC-98 256-color mode: Fix "Active Display Words" value set by INT 18h
+    to 40, not 80, for graphics layer. This has no apparent effect on
+    games but it does fix the sometimes erroneous graphics layer width
+    in the video debug display. Neko Project II source code seems to
+    indicate the 31KHz hsync mode is programmed that way even if 256-color
+    mode. This should not break anything since the GDC doesn't let you
+    read back the "SYNC" reset parameters anyway--this isn't VGA hardware,
+    after all. (joncampbell123).
+  - IPX emulation was broken because it set up the virtual file, IRQ
+    and interrupt handler way too early, which the BIOS startup would
+    then overwrite with the default BIOS IRQ handler. IPX emulation
+    should work now, at least multiplayer DOOM. (joncampbell123)
+  - Added debug menu and dosbox.conf option to show debug information
+    at the bottom of the screen when enabled. This debug information
+    reflects the video state at the start of active display. It can be
+    used to see in real time the state of the palette, display offset,
+    display stride, and other useful information. It is rendered into
+    the frame on purpose so that it appears as part of the picture
+    when you take a screenshot or record a video to AVI or MTS for
+    later review. (joncampbell123)
+  - Dynamic core: Fix serious bug in dynrec dynamic core where calls
+    to handle x86 FPU instructions erronously passed the entire
+    FPU status word instead of passing only the FPU stack pointer.
+    The result of this error was that floating point was erratic,
+    buggy, and often caused memory corruption in DOSBox-X eventually
+    leading to a crash. It should now be possible to properly run
+    DOS games on dynrec based systems, including ARM-based M1 Macbooks,
+    that use the FPU. (joncampbell123)
+  - Debugger: When entering debugger interface, force dynamic core
+    to flush it's state so that the debugger can show the correct
+    state to the user when they use the "FPU" command to see it.
+     (joncampbell123).
+  - VGA emulation: Automatically ignore odd/even mode if "Chain 4"
+    mode is enabled in the sequencer (normally enabled only for
+    256-color mode). Some games accidentally set odd/even mode
+    in 256-color mode and yet apparently worked just fine on real
+    hardware. Without this change, such games will display distorted
+    graphics. It makes logical sense "Chain 4" would take priority
+    over odd/even mode. Note: If a game uses 256-color unchained mode
+    AND foolishly enables odd/even mode, then the resulting distorted
+    graphics are probably accurate to what would happen on real
+    hardware, but then programmers would have caught their mistake
+    and fixed it so that is very unlikely to occur. This helps to fix
+    "Seal: Magic Eye" although some remaining visual artifacts in the
+    game can only be resolved by setting machine=svga_et4000
+     (joncampbell123).
+  - Set usescancodes=true when non-US keyboards are detected
+     (Windows builds) (maron2000)
+  - For long double without using x86 FPU, the code still calls the
+    fstcw instruction and can enable FPU exceptions that crash the
+    emulator, therefore mask off all exception bits to stop that.
+    (joncampbell123)
+  - Added code to mouse emulation to control how often the mouse
+    reports events through the interrupt. Added dosbox.conf option
+    to allow the user to force a report rate, which can be used to
+    force a lower than normal report rate for games that cannot
+    proprly handle higher ones. Allow PS/2 mouse emulation, if
+    rate not set by user, to control report rate. (joncampbell123).
+  - Add code to COMMAND.COM to flush keyboard input before running
+    the command given by the user, and flush again when the command
+    returns. Added option to dosbox.conf to enable/disable this
+    function (joncampbell123)
+  - Fix bug where Tandy mode ignored the "allow more than 640kb"
+    setting.
+  - Fix INT13h AH=02 broken conditional branch which prevents
+    installer of game "Inherit the Earth: Quest for the Orb"
+    to obtain free space of hard drive (maron2000)
+  - qcow2 image support: Make image able to be mounted by
+    drive letters (experimental) (maron2000)
+  - VHD image support: Make file name check for .vhd extension
+    to be case insensitive (maron2000)
+  - VHD image support: Fix auto-detection of geometry (maron2000)
+  - Sound Blaster: Added code to periodically check the user's
+    settings regarding recording source selection and listening.
+    This should allow the user to change those settings on the
+    fly. (joncampbell123).
+  - Sound Blaster: Added options to control whether the generated
+    recording source is audible through the speakers, and what
+    generated audio to send to the client. Options are: silence,
+    hiss, and a 1KHz test tone. (joncampbell123).
+  - Sound Blaster: If the DSP is recording rather than playing,
+    then send audio to the guest at the recording sample rate
+    containing some form of generated audio. Default is silence.
+    This ALSO satisfies the Creative driver CTSB16.SYS when it
+    does the DMA test at startup. (joncampbell123).
+  - Sound Blaster: Fixed code to properly recognize when the
+    guest wants to record audio, including through SB16
+    commands. Prior to this fix, all SB16 Bxh-Cxh commands
+    were handled as if playback even if the command would
+    instead trigger recording. (joncampbell123).
+  - Sound Blaster: Add missing update of "last DMA callback"
+    timestamp that is needed for when the guest pauses DMA
+    during playback or recording. (joncampbell123).
+  - VHD image support: If the VHD image is not a fixed type,
+    say so in the log (previously it said nothing) and say
+    what kind of image was mounted (joncampbell123).
+  - Added INT 13h AH=44h Extended Verify to satisfy any disk
+    utilities that might use it. The function doesn't really
+    do anything except return success (joncampbell123).
+  - Fix CPU stack management to use CPU mode agnostic method
+    using mem_readw instead of real_readw. However the real
+    mode version is used if real or virtual 8086 mode because
+    of comments in an older commit that mention UNLZEXE that
+    depends on real mode stack pointer rollover. This fixes
+    a bug related to protected mode APM (Advanced Power
+    Management) emulation that prevented the Linux kernel
+    from booting (joncampbell123).
+  - Add support for INT 2F function 1680h "Idle" and DOS
+    idle (INT 28h), add code to reduce DOSBox-X CPU load
+    during emulation when the idle function is called,
+    add dosbox.conf enable/disable (default enable) to
+    control this behavior (Github user "finalpatch")
+  - Graphical fixes and dialog support for Haiku OS (amol-)
+  - Allow jp106 keyboard layout in DOS/V mode, automatically
+    choose when keyboard layout is auto on Windows with
+    Japanese keyboard, fix jp106 input in SDL1 builds running
+    on Japanese Windows with English keyboard (nanshiki)
+  - Sync dh fpu state with normal fpu when dynamic core
+    calls normal core to handle self modifying code. Add
+    additional code to other cases. (Github user "finalpatch")
+  - Fix incorrect handling of upper 4 bits of character attributes
+    in video mode 72h in DOS/V mode (nanshiki)
+  - Fix BIOS signature at 0xFFFFF to reflect actual value
+    of Tandy machines so "Ninja" works correctly in
+    Tandy mode (rderooy)
+    See also: [https://www.vogons.org/viewtopic.php?f=32&t=92129]
+  - Change default mixer rate to 48KHz instead of the
+    long standard 44.1KHz. Most modern sound cards on
+    modern OSes render at 48KHz anyway and resample
+    either in hardware or software and most configurations
+    render at 48KHz. Perhaps somewhat improved audio quality
+    could be had by rendering at what most sound cards are
+    doing these days anyway. As usual, audiophiles are free
+    to set the mixer rate to 96KHz if supported by their
+    sound card. (joncampbell123)
+  - Fix PIT 0 timer interrupt handling not to attempt
+    periodic event and error adjustment unless the game
+    is using periodic modes 2 or 3. This fixes PIT timing
+    bug and possible emulator hang when exiting games
+    like "Days of Thunder" that leave PIT 0 in mode 0 or
+    1 on exit for some reason. (joncampbell123)
+  - Fix Sound Blaster DMA rate limits to better reflect
+    actual hardware. SB16 limits to 45454Hz just as
+    Pro and earlier do. These limits were added before
+    the proper measurements were coded and tested on
+    real hardware. (joncampbell123)
+  - Fix S3 cursor emulation to support both X11 and
+    Windows hardware mouse cursor modes available
+    on S3 Virge, Trio, and possibly other cards
+    (John Tsiombikas)
+  - Add EGA/VGA emulation code to keep track at runtime
+    whether planar features are in use. If they are not,
+    then handle EGA/VGA video memory access using a
+    simplified version for a bit of a performance boost
+    in response to complaints about poor VGA emulation
+    performance. (joncampbell123)
+  - VGA palette DAC update: Instead of recalculating
+    the palette map every time a color is written through
+    port 3C9h, set a flag. Defer palette map update to
+    when the next scan line is rendered, in order to
+    improve performance. (joncampbell123)
+  - Add option to enable or disable the "memory I/O
+    optimization" option, meaning the code that was
+    added to assign simplified VGA memory I/O handling
+    when the DOS game is not using any bit planar raster
+    op and more complicated features of the EGA/VGA
+    hardware. (joncampbell123)
+  - Added VGA render on demand mode to VGA emulation.
+    When enabled, VGA emulation does not render scanlines
+    until vertical retrace or when certain registers are
+    written that change the display (attribute controller,
+    VGA palette, etc.). It is added to dosbox.conf as
+    "scanline render on demand" and is false by default
+    because it can provide a performance boost for DOS games
+    but it also tends to break timing-dependent Demoscene
+    effects. The idea is that some emulator performance
+    improvement may be possible by not interrupting the
+    CPU loop per scanline for the same reason that DOSBox
+    SVN has traditionally only rendered the VGA display
+    in quarters instead of per scanline. (joncampbell123).
+  - Remove experimental "alt VGA" rendering code. It was
+    never completed and it is probably starting to
+    bitrot (joncampbell123).
+  - Fix EGA/VGA version of CGA 4-color graphics renderer
+    code to consider all four bitplanes when combining
+    each pair into a 2-bit value. When bitplanes 2+3 are
+    enabled and writeable, the 4-color mode becomes a
+    sort of 2-plane 2 bits per pixel 16-color mode. Fix
+    for machine=ega and "Leather Goddess of Phobos 2",
+    a game that sets up EGA 640x200 16-color mode then
+    suddenly switches on the 2bpp CGA mode as a way to
+    do 16-color dithered graphics. (joncampbell123).
+  - Fix installers for Dynamix games not working.
+    (Allofich & halcyon00)
+  - Fix crash related to swapping between disk
+    images. (Allofich)
+  - SVN r4482: Correct CMS sound pitch. (Allofich)
+
+2022.12.26
+  - Allow more than 640KB of conventional memory,
+    regardless of "allow more than 640kb" option, for
+    Tandy machine type. The setting is capped to 768KB
+    to reflect Tandy systems with that upgrade, which
+    is said to allow a full 640KB for DOS and 128KB for
+    video RAM without any conflict from the MCB chain.
+    Adjust Tandy video emulation for 768KB case. This
+    fixes "Might and Magic III Isles of Terra" crashes
+    in Tandy mode and Tandy graphics because the game
+    does not correctly handle the memory configuration
+    when less RAM is involved. (joncampbell123).
+  - Fix code page CPI/CPX loader to allocate 128KB of
+    memory instead of 84KB. The code allocates a 64KB
+    stack for the executable code within. The 84KB
+    allocation permitted the initial stack pointer to
+    exist beyond available conventional memory if
+    conventional memory size was below about 156KB and
+    cause a crash. This is a quick fix, a long term fix
+    would be to instead set the initial stack pointer
+    to some offset below 0xFFFE based on available memory,
+    just as the .COM executable loader was modified to do
+    some time back to enable proper execution when
+    memsize < 64KB. (joncampbell123)
+  - Do not load country/font information at startup
+    if the code page to load is the same as the default
+    code page. (joncampbell123)
+  - Fix Tab/Shift+Tab in Configuration GUI regarding
+    setting text fields that have a ... button to select
+    from an enumeration. Those buttons are no longer a
+    trap for tab enumeration. (joncampbell123)
+  - Fix Mac OS SDL1 keyboard support code to properly
+    fill in unicode character values in relation to
+    IME checks. This fixes a problem where it was
+    impossible to type anything in the configuration GUI
+    in SDL1 Mac OS builds. (joncampbell123)
+  - Mark VBE mode 0x212 as "do not list" so that it does
+    not appear in normal VBE mode enumeration, while
+    keeping it valid for the Windows 3.1 driver which
+    assumes the mode is there at that number without
+    enumeration. By not listing the mode, drivers like
+    VBEMP and DOS application code will not attempt to
+    use it. There is already another mode number for
+    640x480 24bpp anyway. (joncampbell123)
+  - Fix VBE mode 0x212, which is 640x480 24bpp packed
+    mode but with a per scanline stride of 2048 bytes
+    per pixel set aside for the Windows 3.1 driver and
+    the "640x480 (1Meg) 16 million colors" setting,
+    so that the VBE "Get Mode Info" call reflects the
+    proper per-scanline stride instead of the ideal one.
+    This should fix complaints about VBEMP and 640x480
+    24-bit color mode. Given how minimal the use of the
+    mode is by the Windows 3.1 driver, the 2048 byte
+    mode does not permit setting scan line length or
+    display start i.e. panning is not permitted.
+    (joncampbell123).
+  - Fix Pentium Pro emulation to support microcode
+    related MSRs so that Windows 98 does not crash
+    on startup when cputype=ppro_slow. (joncampbell123).
+  - Added SMV debugger command. This is the linear
+    (virtual) equivalent of the SM "Set Memory"
+    command. (joncampbell123).
+    (https://github.com/joncampbell123/dosbox-x/issues/3826)
+  - Fix debugger help command to list both C / D commands
+    and the DV/DP commands. (joncampbell123)
+  - Add VGA FONTDUMP debugger command for those
+    who might want to take custom fonts in text
+    mode and do something with them outside the
+    emulator. "VGA FONTDUMP" followed by a filename
+    which must have the extension .BIN (for a raw
+    64KB dump of font RAM) or .BMP (for a formatted
+    dump as a monochrome bitmap file). (joncampbell123).
+  - Disabled code to randomly return GDC drawing
+    status active. The implementation was causing
+    severe performance issues. The code has not
+    been removed because it could be optimized and
+    fixed and could even follow the state of GDC
+    drawing. (joncampbell123)
+  - VGA 6-bit DAC mode expand to full 8-bit range,
+    instead of simple shifting (joncampbell123).
+  - Fix 8254 PIT emulation (joncampbell123)
+  - Add dosbox.conf option "cpuid string" to allow
+    CPUID to return custom ID strings instead of just
+    "GenuineIntel". Have fun! (joncampbell123)
+  - Fixed build to properly compile against internal
+    SDL/SDL2 library even if an external version is
+    available (joncampbell123)
+  - Fixed some violations of the one definition rule.
+    (Jookia)
+  - Use pkg-config to find OpenGL (Jookia)
+  - Updated Flatpak SDK and dependencies (Jookia)
+  - PC-98 Implement AVSDRV.SYS PCM function (int D9h)
+    (nanshiki)
+  - PC-98 Support 6x8 Katakana font with int 18h ah=14h
+    (nanshiki)
+  - PC-98 Fix Audio Q-Channel info in MSCDEX (nanshiki)
+  - Fixed FFMPEG 5 compatibility (Jookia)
+  - Fix FFMPEG crash if FFMPEG fails to write header
+    for some reason. (joncampbell123)
+  - Fix setcap on systems with split /usr (Jookia)
+  - Fix building with --disable-core-inline (Jookia)
+  - Fix building not finding fluidsynth (Jookia)
+  - Fix some NetBSD build issues
+    (Jookia, with patch from Nia)
+  - Fix minor graphical issues in mapper GUI (aybe)
+  - Removed --disable-core-inline (Jookia)
+  - Swap SDL2 XInput axes by default for a better
+    out of the box experience (aybe)
+  - SDL1 XInput is now enabled by default for
+    a better out of the box experience (aybe)
+  - add set of cga shaders from dosbox staging (aybe)
+  - Updated mt32emu code to latest(2.7.0).(maron2000)
+    Also, added config option "mt32.engage.channel1"
+     (Refer to https://github.com/munt/munt for details)
+  - Fix missing line in printouts (Issue #3569)
+    (maron2000)
+  - Adjust Int 11 return value to better match real
+    BIOSes. (Allofich)
+  - Limit the "always return bit 6 of port 61h as set
+    for PC" change to only apply to early PC types
+    (MDA, CGA or Hercules). (Allofich)
+  - Integrated SVN commits (Allofich)
+    - r4476: Preserve last error code when no error
+    occurs.
+    - r4477, r4478: Drive system improvements.
+    - r4479: Correct handling of invalid encodings of
+    the BOUND instruction.
+    - r4480: Some confirmed DOS behaviors and minor
+    cleanup.
+    - r4481: Push registers for most DOS function calls;
+    prevents a bug in UNLZEXE from causing a crash, and
+    maybe helps other buggy programs and unusual cases.
+    Use real addressing to support stack pointer wraparound.
+  - Fix Opl3! Duo and Opl2 Audio board audio playback on 
+    unix (stengun)
+  - Fix Japanese input related issues (nanshiki)
+  - Fix START command only ever opens first file
+    (NebularNerd, darac-10, aybe)
+  - Win32 logging console (aybe)
+    - add 'Debug/Clear logging console' menu entry
+    - ensure main window stays above it when shown
+  - Fix overflow in mapper info on SDL2 builds (aybe)
+  - Enable OpenGL output in MinGW builds again (maron2000)
+  - Fixed to display IME marked text in SDL2 version on 
+    macOS (nanshiki)
+  - Fix allocation of IDE slots when mounting images by 
+    IMGMOUNT (maron2000)
+  - Increase of sprintf buffer size in Program::WriteOut()
+    (caiiiycuk)
+  - Fix unexpected behavior of swapping multiple CD images
+    (maron2000)
+  - Fixed build on NetBSD and FreeBSD (Jookia)
+
+2022.09.0 (0.84.3)
+  - Updated FFMPEG video capture to use newer API,
+    fix memory leaks, and fix use-after-free bug that
+    may have been responsible for occasional crashes
+    when using the function. (joncampbell123)
+  - Added 86PCM support for PC-98 emulation. (nanshiki)
+  - Added German language translation. (Link-Mario)
+  - Added code page 867 (compatible with Hebrew DOS
+    WordPerfect) and 868 (Urdu) for the guest-to-host
+    code page conversions. (Wengier)
+  - Improved ANSI.SYS detection for the welcome banner
+    and CLS command. The command "INTRO WELCOME" will
+    re-display the welcome banner without running the
+    commands in AUTOEXEC.BAT. (Wengier)
+  - Improved IME support on macOS SDL2 build. (Wengier)
+  - Improved detection for the Chinese/Japanese/Korean
+    keyboard layouts on Windows platform. (Wengier)
+  - Improved Windows installer for selecting languages
+    for the DOS emulator. (Wengier)
+  - Improved config option "file access tries" for the
+    Linux and macOS platforms. (Wengier)
+  - Fixed SafeDisc 2 check for Red Alert 2 by renaming
+    the IDE CD-ROM device. (rderooy & psyraven)
+  - Fixed problem when inputting characters with call
+    INT21/AH=3Fh in PC-98 mode. (nanshiki)
+  - Fixed hang on zip-mounted drives and minor bug on
+    the DOS file-read code. (tbr)
+  - Fixed file copying problem with Windows 9x install
+    at the end of the DOS-based Setup. (Wengier)
+  - Fixed command like "IF NOT EXIST D:\NUL ..." not
+    working if the drive does not exist. (Wengier)
+  - Fixed that pasting text from clipboard via mouse
+    may not work properly in some cases. (Wengier)
+  - Fixed the mouse scrolling wheel not working with
+    CTMOUSE 2.1's "CTMOUSE /O" in guest DOS. (Wengier)
+  - Fixed window transparency setting not working in
+    macOS SDL1 build. (Wengier)
+  - Fixed macOS small display issue with the in-tree
+    SDL2 library by applying SDL updates. (Wengier)
+  - Fixed menu option "Always on top" to work with the
+    in-tree SDL2 library on macOS. (Wengier)
+  - Fixed the terminal mess-up issue with -display2
+    option on Linux and macOS platforms. (Wengier)
+  - Fixed OpenGL output options not working in Windows
+    ARM32/ARM64 builds. (Wengier)
+
+2022.08.0 (0.84.2)
+  - Fill in PC-98 BIOS data area byte value indicating
+    CPU type (whether 8086, 286, 386 or higher)
+    (Wengier), fill it in at startup (joncampbell123).
+  - CHOICE now supports breaking and errors on end of
+    file or pipe instead of freezing DOSBox-X. (Jookia)
+  - Fixed debugger commands parsing numbers wrong. (Jookia)
+  - Fixed DIR crashing on volumes with more than
+    999,999,999,999 bytes of free space. (Jookia)
+  - Switched to year.month.patch versioning (Jookia)
+  - Fix NE2000 panicking if packets are queued too fast.
+    (kcgen, Jookia)
+  - Fix ISO image format detection to support pure
+    UDF formatted images, meaning that the image
+    lacks any ISO 9660 features and contains only
+    UDF. (joncampbell123).
+  - Added support for UDF filesystem to ISO image
+    handling. It is enabled by default if emulating
+    MS-DOS 7.10 (aka Windows 98) or higher.
+    (joncampbell123).
+  - Added code to detect Rock Ridge according to the
+    System Use Sharing Protocol standard, and to
+    read the SUSP entries correctly for the alternate
+    name, if enabled. (joncampbell123)
+  - Updated ISO MSCDEX drive emulation to scan the
+    available volumes in the ISO image rather than
+    assume the first volume, which makes Joilet
+    support possible if long filenames are enabled
+    and the DOS version is 7.0 or higher. (joncampbell123).
+  - Add IMGMOUNT -o option for ISO filesystem support
+    to enable/disable Joliet extensions, which is a
+    Microsoft extension to ISO 9660 where long names
+    encoded using Unicode UCS-16 exist as a supplementary
+    volume in the ISO image and are used by Windows 95
+    and higher to support long filenames on CD-ROM.
+    Added support for reading the Joliet volume and
+    providing them for both the 8.3 and long filename
+    APIs in DOS. (joncampbell123).
+  - Add IMGMOUNT -o option for ISO filesystem support
+    to enable/disable Rock Ridge long filename support.
+    The option is -o rr=1 to enable and -o rr=0 to
+    disable. (joncampbell123).
+  - Fixed 8.3 name generations on ISO drives with Rock
+    Ridge extension. The ISO drives can be refreshed
+    via RESCAN command like other drives. (Wengier)
+  - SDL_Net support is available for HX-DOS builds,
+    similar to other builds. Packet driver is needed
+    for network capability in DOS. (Wengier)
+  - Fixed line endings when copying to shared clipboard
+    (e.g. CLIP$) in non-Windows platforms. (Wengier)
+  - Fixed problems with SDL1 Windows builds in which
+    the user had to type the Fullscreen mapper shortcut
+    twice. It seems a SDL1 library function that is
+    used to indicate ignoring or adding a class of
+    events also liked to flush the event queue. This
+    is called on mode change. This caused lost
+    keystrokes, leaving the mapper the impression that
+    those keys were still held down. (joncampbell123).
+  - Fixed PC-98 mode MS-DOS 7/Windows 9x boot disk's
+    80386 CPU check. (Wengier)
+  - Added support for auto-converting non-image drives
+    (such as mounted local drives) to disk images, so
+     that they will be visible when booting into guest
+    systems. A config option "convertdrivefat" (in
+    [dosbox] section) is added to toggle this setting,
+    or you can toggle via BOOT command's -convertfat
+    (or -convertfatro option for read-only access) and
+    -noconvertfat options. There're also config options
+    "convert fat free space" (in [dosbox] section) and
+    "drive z convert fat" (in [dos] section) to control
+    free space (in MB; 0 means read-only) and whether
+    to also convert virtual drive Z:. Much of the code
+    is imported from DOSBox Pure, with added support
+    for PC-98 HDI and code page conversions. (Wengier)
+  - Added menu option "Save to disk image" (under drive
+    letter in "Drive" menu) to save a mounted non-FAT
+    drive to selected disk image (IMG/HDI). (Wengier)
+  - Added the "Limit disk transfer speed" menu group
+    (under "DOS") to toggle the hard & floppy disk data
+    rate function. Also moved "Quick launch program..."
+    menu from "DOS" menu to "Main" menu. (Wengier)
+  - Added code pages 856 (Hebrew) and 859 (Latin 9) for
+    the guest-to-host code page conversions. (Wengier)
+  - Added config option to allow create of temporary
+    devices for piping operations when a temporary DOS
+    path is not available. (Wengier)
+  - Added support for ATAPI raw sector reading with
+    READ CD command. (schellingb)
+  - Report bad sectors recorded in raw CD images as
+    ATAPI read errors. (schellingb)
+  - You can use CONFIG -set langcp=... to change the
+    current language along with the embedded code page,
+    or CHCP nnn:... to specify a language file as well,
+    e.g. "CHCP 932:" or "CHCP 932:ja_JP" for Japanese
+    code page and language file. Also improved -langcp
+    option for SBCS code pages, and Windows installer
+    will additionally set keyboard layouts for the
+    selected languages. (Wengier)
+  - Changed menu option "Restart DOSBox-X with language
+    file..." to "Load language file..." for loading
+    language files without rebooting DOSBox-X, unless
+    a guest system is currently running. (Wengier)
+  - Imported the more recent MBR code from FreeDOS to
+    avoid the "boot menu" as in older code. (Wengier)
+  - When changing TTF font, DOSBox-X will try to show
+    the number of missing characters in the new TTF
+    font (if any). (Wengier)
+  - Fixed color becoming darker after changing TTF font
+    multiples times in TTF output. (Wengier)
+  - Fixed display of individual/total file sizes with
+    DIR command when they are very large. (Wengier)
+  - Fixed non-US code page conversions for mounted FAT
+    drives. (Wengier)
+  - Fixed incorrect message displays in Configuration
+    Tool and Mapper Editor when booting into guest
+    systems with language files. (Wengier)
+  - Fixed possible "Path not found" bug when switching
+    to code page 950 from another code page. (Wengier)
+  - Fixed creating directories may not work properly
+    for overlay drives on Windows systems. (Wengier)
+  - Fixed -set and -get options of CONFIG command when
+    there are spaces in property names, without having
+    to prepend the section names. For example, command
+    CONFIG -get "synchronize time" is supported just
+    as CONFIG -get "dosbox synchronize time". Similar
+    for -SET option when launching DOSBox-X. (Wengier)
+0.84.1
+  - Added dosbox(-x).conf option to enable workaround
+    for errant DOS programs that set the TF (trap flag)
+    and then crash. Added code to DOS kernel INT 01h
+    handler to clear TF flag if instructed to by the
+    dosbox(-x).conf setting which can prevent such
+    errant programs from crashing. Needed for 1996 demo
+    "Dyslexia" by Threesome. (joncampbell123)
+  - Fix RETF instruction handling to only modify the
+    low 16 bits of ESP in real mode, even if the
+    immediate value for RETF is a large value like
+    FFFEh (fix for Finster by Mad Scientists). Prior
+    to this fix, it was possible to increment the
+    upper 32 bits of ESP from real mode using a
+    normal 16-bit RETF with a very large immediate
+    value. This fix removes the need for the ENTER
+    masking dosbox(-x).conf option entirely and allows
+    Finster to run without it. (joncampbell123).
+  - Added dosbox(-x).conf option to control whether the
+    ENTER instruction masks the stack pointer to 64KB
+    if the stack segment is 16-bit, which is off by
+    default because real Intel processors do not do
+    that. (joncampbell123).
+  - Added dosbox(-x).conf option that can instruct EGA/
+    VGA emulation to ignore the display blanking bit in
+    the sequencer registers. Some games appear to have
+    bugs in their VGA programming code that can
+    accidentally set that bit and therefore show
+    nothing on screen. Fix for 1996 game "Finster" by
+    Mad Scientists. The game appears to make this
+    programming mistake on any fork of DOSBox
+    including DOSBox-X, and is reported to also make
+    the same mistake on other emulators like 86box.
+    However most forks of DOSBox have a matching bug
+    in their VGA emulation that allows the blanked
+    display to appear normally regardless of that
+    register bit unless run with machine=vgaonly.
+    It's unclear if there is anything about DOSBox
+    or DOSBox-X emulation that causes the game to
+    misprogram the registers. (joncampbell123).
+  - If guest uses ENTER instruction from 16-bit code
+    with 66h (32-bit operand) prefix, and the CPU is
+    in real mode or the stack segment is 16-bit, mask
+    stack pointer with 0xFFFF. This fixes 1996 game
+    "Finster" by Mad Scientists (joncampbell123).
+  - DOSBox-X will now search for resource files such as
+    fonts and translations in the resource directory (
+    C:/DOSBox-X in Windows, /usr/(local/)share/dosbox-x
+    in Linux, and dosbox-x.app/Contents/Resources in
+    macOS) in addition to other locations. (Wengier)
+  - Updated DOSBox-X's integration device to version
+    1.0.1, adding API calls such as DOSBox-X's version
+    number and platform, and some DOS-related status
+    such as DOS version number. (Wengier)
+  - Improve the HX-DOS build package, including the
+    TTF output support and accessory files. (Wengier)
+  - Use long double for internal event scheduling
+    if available, to improve accuracy (joncampbell123).
+  - Fix remaining SDL2 Windows problems by adding
+    missing break statement above window event
+    handler. (joncampbell123).
+  - Move "Always on top" menu option from "Video" to
+    "Main" menu, also enabled for Windows/macOS SDL2
+    builds when possible. (Wengier)
+  - Add workarounds for SDL2 builds to avoid problems
+    with window resize, menu update, and restore
+    events that sometimes caused the emulator to hang
+    on startup in Windows. (joncampbell123).
+  - Add "Set transparency..." and "Set text in title
+    bar..." menu options under "Video" to change window
+    transparency and title bar text. (Wengier)
+  - Add special properties to CONFIG command including
+    "system" and "version". (Wengier)
+  - Fix DOS 8.3 filename generations when there are
+    special characters in the filenames. (Wengier)
+  - Fix creation of disk images with spaces using the
+    "Create blank disk image..." menu option. (Wengier)
+  - Fix IMGMAKE to provide executable code in MS-DOS
+    partition or floppy disk boot sector following
+    the BPB, that prints "This is not a bootable disk"
+    instead of leaving zeros that lead the CPU astray
+    and possibly hang the system in the event anything
+    tries to boot the partition (joncampbell123).
+  - Fix emulator segfault on invalid encoding of
+    BOUND instruction (joncampbell123).
+  - Address auto-centering on mode change complaints
+    by making the "-" setting of windowposition the
+    default. (joncampbell123).
+  - Added MinGW-lowend SDL2 build, which is compatible
+    with Windows XP. Also updated the build selection
+    page for Windows installers. (Wengier)
+  - Fix windows transparency during TTF output switch
+    in Windows SDL2 builds. (Wengier)
+  - Fix SDL2 Windows builds to flag a resize as not
+    user initiated only if the presence of the menu
+    bar changes. This fixes a problem where SDL2
+    builds did not acknowledge window resize events
+    at all. (joncampbell123).
+  - Fix FluidSynth weird sound issue in 32-bit Visual
+    Studio SDL2 build. (Wengier)
+  - Fluidsynth: Fix uninitialized conditional object
+    init in Windows builds (joncampbell123).
+  - Linux/X11: Add an X11 error handler function to
+    handle the occasional X11 error that can happen
+    within the SDL2 library if certain events, like
+    window resize, occur too frequently. The custom
+    error handler logs the error but does not abort
+    the emulator like the default one would.
+    (joncampbell123).
+  - Fix SDL2 builds with output=surface not to render
+    if the window at any point is too small. Resizing
+    the window below the minimum supported by the
+    DOS screen will not longer trigger segfaults or
+    assertion failures. Issue #3348. (joncampbell123).
+  - Fix IME not working on Windows when -langcp option
+    is used to load a language with DBCS codepage, or
+    in 32-bit MinGW lowend SDL1 build. (Wengier)
+  - Fixed INT 10h failing to fully clear Tandy video
+    memory when entering 16-color graphics modes.
+    (joncampbell123).
+  - Fixed missing/NULL INT 1Fh interrupt vector with
+    CGA/PCjr/Tandy machine types. DOS games that print
+    to screen using INT 10h in graphics modes can now
+    print extended (>=128) character codes correctly.
+    This fixes "BushBuck: A Treasure Hunt" and enables
+    it's rather odd Tandy detection routine to work
+    with machine=tandy. (joncampbell123).
+  - Disney Sound Source: Fix problems between Disney
+    sound source and parallel port emulation. Fix the
+    code to enable Disney Sound System emulation either
+    by disney=true (DOSBox SVN compatible) or
+    parallel1=disney (The DOSBox-X way). (joncampbell123).
+  - DOS SHELL: Change shell command parsing to make
+    unusual combinations of command plus trailing
+    command possible such as ECHO. ECHO; ECHO: ECHO[
+    ECHO] ECHO\ ECHO/ ECHO" ECHO+ (issue #3503).
+    (joncampbell123).
+  - DIR command supports more sorting methods including
+    "DIR /OGD", "DIR /OGE", and "DIR /OGS". (Wengier)
+  - Support for BDF and PCF bitmap fonts for DOS/V
+    functions, such as the free WenQuanYi bitmap font
+    (bundled for displaying CJK characters). (Wengier)
+  - EGA: Add machine type to emulate 200-line (CGA
+    compatible) EGA display mode, machine=ega200.
+    All text modes have 8x8 character cells, use CGA
+    compatible video timing, and the 640x350 modes
+    are not available. Fix EGA display offset register
+    usage to properly work with alphanumeric text
+    mode when "word mode" is turned off. This fixes
+    IBM demonstration program "Fantasy Land".
+    (joncampbell123).
+  - IDE: Remove extra state from IDE controller that
+    is managed by the drive. The ATA-1 standard seems
+    to say that status and drive/head registers on
+    read back always come from the ATA device.
+    (joncampbell123).
+  - IDE: If ATA device is busy, all IDE registers
+    return the status register and BSY bit according
+    to ATA-1 standard (joncampbell123).
+  - IDE ATAPI CD-ROM: Add ATAPI command BEh READ CD.
+    This command is like the 28h/A8h READ command but
+    specific to the CD/CD-ROM format and allows reading
+    the various sector types including data sectors and
+    CD audio. Windows NT 4.0 requires this, or else it
+    treats the CD-ROM drive like a non-working device.
+    (joncampbell123).
+0.84.0
+  - CMOS century register now aliased to register
+    32h and 37h to appease Windows 2000, which assumes
+    the century is stored there and will complain
+    about invalid date/time otherwise (joncampbell123).
+  - Treat IDE command E7h (FLUSH CACHE) as a no-op
+    so that the common use of it from Windows 2000
+    doesn't spam your log file (joncampbell123).
+  - BIOS: At post, if DOS kernel was active and the
+    DOS Shell was still running, initiate a proper
+    system reset event. Some software, including the
+    WINNT.EXE install program for Windows NT, like to
+    restart the system by JMPing to the BIOS POST
+    entry point. Prior to this fix, doing that from a
+    DOS program caused instability with mounted images
+    and the DOS shell due to recursion. (joncampbell123).
+  - Fix FPU implementation for aarch64 cores (cimarronm)
+  - Fixed INT 10h and DAC palette mapping to resolve
+    incorrect colors with Hercules graphics mode when
+    a game calls INT 10h to set video mode after setting
+    it up. This resolves the incorrect blue on black
+    color map for Grand Prix by Accolade (joncampbell123).
+  - Add recursive mkdir_p() directory creation so that
+    overlay filesystem support can correctly create
+    a subdirectory of any depth, instead of only one
+    level deep from an existing directory on disk.
+    (joncampbell123)
+  - Add dosbox(-x).conf option "isapnpport" to control
+    whether the ISA Plug & Play I/O port is presented
+    to the guest. Setting is "true", "false", or "auto".
+    "auto" means to enable if PnP BIOS is enabled.
+    Previously this port was always present even if
+    the PnP BIOS was not. Some operating systems,
+    including Windows NT/2000/XP, will enumerate ISA
+    Plug & Play hardware by themselves whether or not
+    the PnP BIOS is present. (joncampbell123)
+  - Fix FPU operations using the top of stack on
+    32-bit VS builds (cimarronm)
+  - Add IDE ATAPI command MECHANISM STATUS for
+    Windows NT 4.0 because that system seems
+    to want to know if your CD-ROM drive is a
+    CD changer (joncampbell123)
+  - IDE Plug & Play resource descriptor changed to use
+    2-byte structure for listing IRQ resource instead of
+    3 bytes. This (for some reason) fixes problems with
+    the IDE driver in Windows NT 4.0, Windows 2000, and
+    Windows XP and allows them to boot properly.
+    (joncampbell123)
+  - INT 13h extensions function 48h is supposed to
+    return physical geometry, not the logical geometry
+    normally returned by function 08h. This means for
+    IDE devices, to return the geometry the IDE controller
+    is using. (joncampbell123)
+  - Enhanced the Mapper Editor interface. The Mapper UI
+    has been greatly improved. (aybe)
+  - Add IDE ATAPI command MECHANISM STATUS for Windows
+    NT 4.0 because that system seems to want to know if
+    your CD-ROM drive is a CD changer. (joncampbell123)
+  - Fix IDE devices to start up with the drive ready
+    bit set for OSes that expect it when probing IDE
+    devices. This allows the Linux kernel to see IDE
+    ATA drives emulated by DOSBox-X. (joncampbell123)
+  - Fix IDE ATAPI emulation to correctly handle CD
+    READ across one or more DRQ block transfers. Use
+    block size given by guest in consideration of DRQ
+    block size, which allows ATAPI CD-ROM emulation to
+    work properly with the Linux kernel. (joncampbell123)
+  - Add debug command to show PC-98 color palettes.
+    Corrected typo. (joncampbell123)
+  - Add support for PC-98 monochrome graphics mode.
+    (joncampbell123)
+  - IDE emulation now handles implementation events per
+    IDE device instead of per IDE controller, which
+    may resolve IDE controller issues with some guests.
+    (joncampbell123)
+  - Added PC-98 GDC drawing commands, which is
+    based on Neko Project II source code (nanshiki)
+  - Added PC-98 LIO BIOS interface, which is based on
+    Neko Project II source code (nanshiki)
+  - INT 21h AH=31h Terminate And Stay Resident: If the
+    program called INT 21h to free its own PSP segment,
+    reassign the block back to the program as allocated
+    and then resize as expected. Needed for PC-98 game
+    "Yu No" in which PLAY6.EXE, one of the resident
+    drivers used for music, does just that. (joncampbell123)
+  - Add a hack to enable read access to port 0xa460 on PC-98 which 
+    returns Sound ID to detect the sound board available.
+    Note that the current hack returns Sound ID of PC-9801-86 board
+    regardless of the board selected to emulate. (maron2000)
+  - Adds WINCHECK to list of programs which should not
+    return a valid installation check for WinOldAp
+    (AX=1700h/int2fh) so it doesn't mistakenly believe
+    Windows is running (cimarronm)
+  - Add minimal support for IDE SET FEATURES command EFh.
+    (joncampbell123)
+  - Fix CMPXCHG8B to change only the ZF flag, instead of
+    changing ZF with other flags in an undefined state
+    afterwards. This fixes problems with the Windows 2000
+    kernel booting up and cputype=pentium (though I am
+    unable to get past the INACCESSIBLE_BOOT_DEVICE error).
+    (joncampbell123)
+  - Updates XADD instruction to set appropriate flags
+    (cimarronm)
+  - Updates to FPU to handle opcode size prefix (66h)
+    on FSTENV/FLDENV/FSAVE/FRSTOR instructions (cimarronm)
+  - Update FLD constant FPU instructions to more
+    accurately match FPU implementations (cimarronm)
+  - Fixed dynamic_dynrec being displayed as dynamic_x86
+    in menu, and PREFETCH instruction breakage in the
+    dynamic core. (Jookia)
+  - Fixed crash if no dynamic cores available (Jookia)
+  - Fixed TTF mode breaking a guest not running the
+    DOS kernel. (Jookia)
+  - Fix DBCS table initialization on reset and
+    restart (cimarronm)
+  - Fixed some guest systems may not work as expected
+    in non-TTF outputs. (Wengier)
+  - Fixed IME input not working in MinGW builds, and
+    FluidSynth in MinGW-lowend builds. (Wengier)
+  - Fixed resizable OpenGL Voodoo window not working
+    properly on Windows in previous version. (Wengier)
+  - Fixed commands "CHOICE /N /C:123" and "MIXER /GUI"
+    not working properly in previous version. (Wengier)
+  - Integrated commits from mainline (Allofich)
+    - Disable leading directory validity check in
+    DOS_FindDevice.
 0.83.25
   - XGA: Do not register XGA I/O ports unless emulating
     S3 chipset (such as machine=svga_s3) (joncampbell123)
@@ -199,8 +1279,9 @@
   - Fix audio speech stuttering issue in SpaceQuest 4
     v1.3 using Sound Blaster. (grapeli & rderooy)
   - Fix issue with Lemmings palette swapping not working
-    properly. (maron20000 & grapeli)
-  - Updated MT32emu to version 2.6.1. (maron20000)
+    properly. (maron2000 & grapeli)
+  - Updated MT32emu to version 2.6.1. (maron2000)
+    (Refer to https://github.com/munt/munt for details)
   - Updated DOSMID to version 0.9.6. (Wengier)
   - Integrated commits from mainline (Allofich)
     - Indicate in BIOS memory when keyboard ACK received.

@@ -42,7 +42,7 @@ union pagefault_restore {
 	uint32_t dword;
 };
 
-static struct DynDecode {
+static struct DynDecodeDynX86 {
 	PhysPt code;
 	PhysPt code_start;
 	PhysPt eip_location;
@@ -338,7 +338,7 @@ static void dyn_set_eip_last_end(DynReg * endreg) {
 	gen_protectflags();
 	gen_lea(endreg,DREG(EIP),0,0,decode.code-decode.code_start);
 	gen_dop_word_imm(DOP_ADD,decode.big_op,DREG(EIP),decode.op_start-decode.code_start);
-	decode.eip_location=decode.op_start; // this is the only place where a pagefault can happen after chaning eip
+	decode.eip_location=decode.op_start; // this is the only place where a pagefault can happen after changing eip
 }
 
 static INLINE void dyn_set_eip_end(void) {
@@ -360,11 +360,11 @@ static INLINE void dyn_set_eip_last(void) {
 }
 
 
-enum save_info_type {db_exception, cycle_check, normal, fpu_restore, trap, page_fault};
+enum save_info_type_dynx86 {db_exception, cycle_check, normal, fpu_restore, trap, page_fault};
 
 
 static struct {
-	save_info_type type;
+	save_info_type_dynx86 type;
 	DynState state;
 	uint8_t * branch_pos;
 	uint32_t eip_change;
@@ -379,7 +379,7 @@ static struct {
 Bitu used_save_info=0;
 
 
-static BlockReturn DynRunException(uint32_t eip_add,uint32_t cycle_sub,uint32_t dflags) {
+static BlockReturnDynX86 DynRunException(uint32_t eip_add,uint32_t cycle_sub,uint32_t dflags) {
 	reg_flags=(dflags&FMASK_TEST) | (reg_flags&(~FMASK_TEST));
 	reg_eip+=eip_add;
 	CPU_Cycles-=cycle_sub;
@@ -392,7 +392,7 @@ static BlockReturn DynRunException(uint32_t eip_add,uint32_t cycle_sub,uint32_t 
 	return BR_Normal;
 }
 
-static BlockReturn DynRunPageFault(uint32_t eip_add,uint32_t cycle_sub,uint32_t pf_restore,uint32_t dflags) {
+static BlockReturnDynX86 DynRunPageFault(uint32_t eip_add,uint32_t cycle_sub,uint32_t pf_restore,uint32_t dflags) {
 	pagefault_restore pf_restore_struct;
 	pf_restore_struct.dword = pf_restore;
 	reg_flags=(dflags&FMASK_TEST) | (reg_flags&(~FMASK_TEST));
@@ -2572,7 +2572,7 @@ restart_prefix:
 			/* LSL */
 			case 0x03: dyn_larlsl(false);break;
 			/* hinting NOPs */
-			case 0x18:case 0x19:case 0x1a:case 0x1b:case 0x1c:case 0x1d:case 0x1e:case 0x1f:
+			case 0x19:case 0x1a:case 0x1b:case 0x1c:case 0x1d:case 0x1e:case 0x1f:
 				if (CPU_ArchitectureType<CPU_ARCHTYPE_PPROSLOW) goto illegalopcode;
 				break;
 			/* Short conditional jumps */
@@ -3187,7 +3187,7 @@ restart_prefix:
 						&DynRegs[decode.modrm.rm&3],decode.modrm.rm&4);
 				}
 				break;
-			case 0x7:		//CALBACK Iw
+			case 0x7:		//CALLBACK Iw
 				gen_save_host_direct(&core_dyn.callback,decode_fetchw());
 				dyn_set_eip_end();
 				dyn_reduce_cycles();

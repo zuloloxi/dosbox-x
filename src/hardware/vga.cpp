@@ -155,11 +155,14 @@
 
 #include "zipfile.h"
 
+#include <output/output_ttf.h>
+
 using namespace std;
 
 Bitu pc98_read_9a8(Bitu /*port*/,Bitu /*iolen*/);
 void pc98_write_9a8(Bitu port,Bitu val,Bitu iolen);
 
+void SVGA_Setup_ATI(void);
 bool VGA_IsCaptureEnabled(void);
 void VGA_UpdateCapturePending(void);
 bool VGA_CaptureHasNextFrame(void);
@@ -176,8 +179,11 @@ unsigned char*                      pc98_pgraph_current_display_page;
 unsigned char*                      pc98_pgraph_current_cpu_page;
 
 bool                                vga_8bit_dac = false;
-bool                                vga_alt_new_mode = false;
 bool                                enable_vga_8bit_dac = true;
+bool                                ignore_sequencer_blanking = false;
+bool                                memio_complexity_optimization = true;
+bool                                vga_render_on_demand = false; // Render at vsync or specific changes to hardware instead of every scanline
+signed char                         vga_render_on_demand_user = -1;
 
 bool                                pc98_crt_mode = false;      // see port 6Ah command 40h/41h.
                                                                 // this boolean is the INVERSE of the bit.
@@ -309,6 +315,7 @@ void vsync_poll_debug_notify() {
 uint32_t CGA_2_Table[16];
 uint32_t CGA_4_Table[256];
 uint32_t CGA_4_HiRes_Table[256];
+uint32_t CGA_4_HiRes_TableNP[256];
 uint32_t CGA_16_Table[256];
 uint32_t TXT_Font_Table[16];
 uint32_t TXT_FG_Table[16];
@@ -334,6 +341,8 @@ void VGA_SetMode(VGAModes mode) {
     VGA_StartResize();
 }
 
+bool J3_IsCga4Dcga();
+
 void VGA_DetermineMode(void) {
     if (svga.determine_mode) {
         svga.determine_mode();
@@ -348,8 +357,19 @@ void VGA_DetermineMode(void) {
                 if (vga.s3.reg_31 & 0x8) VGA_SetMode(M_LIN8);
                 else VGA_SetMode(M_VGA);
             }
-            else if (vga.gfx.mode & 0x20) VGA_SetMode(M_CGA4);
-            else if ((vga.gfx.miscellaneous & 0x0c)==0x0c) VGA_SetMode(M_CGA2);
+// NTS: Also handled by M_EGA case
+//          else if (vga.gfx.mode & 0x20) VGA_SetMode(M_CGA4);
+
+// NTS: Two things here. One is that CGA 2-color mode (and the MCGA 640x480 2-color mode)
+//      are just EGA planar modes with fewer bitplanes enabled. The planar render mode can
+//      display them just fine. The other is that checking for 2-color CGA mode entirely by
+//      whether video RAM is mapped to B8000h is a really lame way to go about it.
+//
+//      The only catch here is that a contributer (Wengier, I think?) tied a DOS/V CGA rendering
+//      mode into M_CGA2 that we need to watch for.
+//
+            else if ((vga.gfx.miscellaneous & 0x0c)==0x0c && J3_IsCga4Dcga()) VGA_SetMode(M_DCGA);
+
             else {
                 // access above 256k?
                 if (vga.s3.reg_31 & 0x8) VGA_SetMode(M_LIN4);
@@ -446,8 +466,12 @@ void VGA_SetClock(Bitu which,Bitu target) {
     VGA_StartResize();
 }
 
+uint8_t CGAPal2[2] = {0,0};
+uint8_t CGAPal4[4] = {0,0,0,0};
+
 void VGA_SetCGA2Table(uint8_t val0,uint8_t val1) {
     const uint8_t total[2] = {val0,val1};
+    for (unsigned int i=0;i < 2;i++) CGAPal2[i] = total[i];
     for (Bitu i=0;i<16u;i++) {
         CGA_2_Table[i]=
 #ifdef WORDS_BIGENDIAN
@@ -467,6 +491,7 @@ void VGA_SetCGA2Table(uint8_t val0,uint8_t val1) {
 
 void VGA_SetCGA4Table(uint8_t val0,uint8_t val1,uint8_t val2,uint8_t val3) {
     const uint8_t total[4] = {val0,val1,val2,val3};
+    for (unsigned int i=0;i < 4;i++) CGAPal4[i] = total[i];
     for (Bitu i=0;i<256u;i++) {
         CGA_4_Table[i]=
 #ifdef WORDS_BIGENDIAN
@@ -484,6 +509,15 @@ void VGA_SetCGA4Table(uint8_t val0,uint8_t val1,uint8_t val2,uint8_t val3) {
             ((Bitu)total[((i >> 3u) & 1u) | ((i >> 6u) & 2u)] << 0u  ) | (Bitu)(total[((i >> 2u) & 1u) | ((i >> 5u) & 2u)] << 8u  ) |
             ((Bitu)total[((i >> 1u) & 1u) | ((i >> 4u) & 2u)] << 16u ) | (Bitu)(total[((i >> 0u) & 1u) | ((i >> 3u) & 2u)] << 24u );
 #endif
+        CGA_4_HiRes_TableNP[i]=
+#ifdef WORDS_BIGENDIAN
+            ((Bitu)(((i >> 0u) & 1u) | ((i >> 3u) & 2u)) << 0u  ) | (Bitu)((((i >> 1u) & 1u) | ((i >> 4u) & 2u)) << 8u  ) |
+            ((Bitu)(((i >> 2u) & 1u) | ((i >> 5u) & 2u)) << 16u ) | (Bitu)((((i >> 3u) & 1u) | ((i >> 6u) & 2u)) << 24u );
+#else
+            ((Bitu)(((i >> 3u) & 1u) | ((i >> 6u) & 2u)) << 0u  ) | (Bitu)((((i >> 2u) & 1u) | ((i >> 5u) & 2u)) << 8u  ) |
+            ((Bitu)(((i >> 1u) & 1u) | ((i >> 4u) & 2u)) << 16u ) | (Bitu)((((i >> 0u) & 1u) | ((i >> 3u) & 2u)) << 24u );
+#endif
+
     }
 
     if (machine == MCH_MCGA) {
@@ -924,6 +958,28 @@ void VGA_Reset(Section*) {
 
     vga_8bit_dac = false;
     enable_vga_8bit_dac = section->Get_bool("enable 8-bit dac");
+    ignore_sequencer_blanking = section->Get_bool("ignore sequencer blanking");
+    memio_complexity_optimization = section->Get_bool("memory io optimization 1");
+
+    vga_render_on_demand = false;
+
+    {
+        const char *str = section->Get_string("scanline render on demand");
+        if (!strcmp(str,"true") || !strcmp(str,"1"))
+            vga_render_on_demand_user = 1;
+        else if (!strcmp(str,"false") || !strcmp(str,"0"))
+            vga_render_on_demand_user = 0;
+        else
+            vga_render_on_demand_user = -1;
+    }
+
+    if (memio_complexity_optimization)
+        LOG_MSG("Memory I/O complexity optimization enabled aka option 'memory io optimization 1'. If the game or demo is unable to draw to the screen properly, set the option to false.");
+
+    if (vga_render_on_demand_user > 0)
+        LOG_MSG("'scanline render on demand' option is enabled. If this option breaks the game or demo effects or display, set the option to false.");
+    else if (vga_render_on_demand_user < 0)
+        LOG_MSG("The 'scanline render on demand' option is available and may provide a modest boost in video render performance if set to true.");
 
     vga_memio_delay_ns = section->Get_int("vmemdelay");
     if (vga_memio_delay_ns < 0) {
@@ -1013,7 +1069,12 @@ void VGA_Reset(Section*) {
      * for selecting machine type AND video card. */
     switch (machine) {
         case MCH_HERC:
-            if (vga.mem.memsize < _KB_bytes(64)) vga.mem.memsize = _KB_bytes(64);
+            if (hercCard >= HERC_InColor) {
+                if (vga.mem.memsize < _KB_bytes(256)) vga.mem.memsize = _KB_bytes(256);
+            }
+            else {
+                if (vga.mem.memsize < _KB_bytes(64)) vga.mem.memsize = _KB_bytes(64);
+            }
             break;
         case MCH_MDA:
             if (vga.mem.memsize < _KB_bytes(4)) vga.mem.memsize = _KB_bytes(4);
@@ -1036,7 +1097,7 @@ void VGA_Reset(Section*) {
             // TODO: There are reports of VGA cards that have less than 256KB in the early days of VGA.
             //       How does that work exactly, especially when 640x480 requires about 37KB per plane?
             //       Did these cards have some means to chain two bitplanes odd/even in the same way
-            //       tha EGA did it?
+            //       than EGA did it?
             if (vga.mem.memsize != 0 || svgaCard == SVGA_None) {
                 if (vga.mem.memsize < _KB_bytes(256)) vga.mem.memsize = _KB_bytes(256);
             }
@@ -1312,7 +1373,15 @@ static const UINT8 gdc_defsyncm31[8] = {0x10,0x4e,0x47,0x0c,0x07,0x0d,0x90,0x89}
 static const UINT8 gdc_defsyncs31[8] = {0x06,0x26,0x41,0x0c,0x83,0x0d,0x90,0x89};
 
 static const UINT8 gdc_defsyncm31_480[8] = {0x10,0x4e,0x4b,0x0c,0x03,0x06,0xe0,0x95};
-static const UINT8 gdc_defsyncs31_480[8] = {0x06,0x4e,0x4b,0x0c,0x83,0x06,0xe0,0x95};
+static const UINT8 gdc_defsyncs31_480[8] = {0x06,0x26,0x41,0x0c,0x83,0x06,0xe0,0x95};
+
+/* ^ NTS: Even in 256-color mode the expectation for Active Display Words is 40, not 80.
+ *        Writing 80 when INT 18h is used to invoke 256-color mode isn't a problem but
+ *        it does cause erroneous values in debug functions (1280x480 for
+ *        "login 256-color paint tool"?). The correct value is 40 according to NP2
+ *        source code (in what cases exactly?) and some games that manually set up
+ *        640x400 16-color mode AND THEN directly switch to 256-color mode (still 640x400)
+ *        expect the ADW to remain 40 ("battle skin panic"). */
 
 void PC98_Set24KHz(void) {
     pc98_gdc[GDC_MASTER].write_fifo_command(0x0F/*sync DE=1*/);
@@ -1491,6 +1560,22 @@ void VGA_Init() {
 
 	vga.config.chained = false;
 
+    vga.herc.xMode = 0;
+    vga.herc.underline = 0xD;
+    vga.herc.strikethrough = 0xD;
+    vga.herc.latch = 0;
+    vga.herc.exception = 0x20;
+    vga.herc.planemask_protect = 0;
+    vga.herc.planemask_visible = 0xF;
+    vga.herc.maskpolarity = 0xFF;
+    vga.herc.write_mode = 0;
+    vga.herc.dont_care = 0;
+    vga.herc.fgcolor = 0xF;
+    vga.herc.bgcolor = 0x0;
+    vga.herc.latchprotect = 0;
+    vga.herc.palette_index = 0;
+    for (unsigned int i=0;i < 8;i++) vga.herc.palette[i] = i;
+    for (unsigned int i=8;i < 16;i++) vga.herc.palette[i] = i + 0x30;
     vga.draw.render_step = 0;
     vga.draw.render_max = 1;
 
@@ -1745,17 +1830,17 @@ void JEGA_setupAX(void) {
 	jega.RDFFB = 0x00;//bc: Font access first byte
 	jega.RDFSB = 0x00;//bd: second
 	jega.RDFAP = 0x00;//be: Font Access Pattern
-	jega.RPESL = 0x00;//09: end scan line (superceded by EGA)
-	jega.RPULP = 0x00;//14: under scan line (superceded by EGA)
+	jega.RPESL = 0x00;//09: end scan line (superseded by EGA)
+	jega.RPULP = 0x00;//14: under scan line (superseded by EGA)
 	jega.RPSSC = 1;//db: DBCS start scan line
 	jega.RPSSU = 3;//d9: 2x DBCS upper start scan
 	jega.RPSSL = 0;//da: 2x DBCS lower start scan
 	jega.RPPAJ = 0x00;//dc: super imposed (only AX-2 system, not implemented)
 	jega.RCMOD = 0x00;//dd: Cursor Mode (not implemented)
-	jega.RCCLH = 0x00;//0e: Cursor location Upper bits (superceded by EGA)
-	jega.RCCLL = 0x00;//0f: Cursor location Lower bits (superceded by EGA)
-	jega.RCCSL = 0x00;//0a: Cursor Start Line (superceded by EGA)
-	jega.RCCEL = 0x00;//0b: Cursor End Line (superceded by EGA)
+	jega.RCCLH = 0x00;//0e: Cursor location Upper bits (superseded by EGA)
+	jega.RCCLL = 0x00;//0f: Cursor location Lower bits (superseded by EGA)
+	jega.RCCSL = 0x00;//0a: Cursor Start Line (superseded by EGA)
+	jega.RCCEL = 0x00;//0b: Cursor End Line (superseded by EGA)
 	jega.RCSKW = 0x20;//de: Cursor Skew control (not implemented)
 	jega.ROMSL = 0x00;//df: Unused?
 	jega.RSTAT = 0x03;//bf: Font register accessible status
@@ -1800,6 +1885,9 @@ void SVGA_Setup_Driver(void) {
         break;
     case SVGA_ParadisePVGA1A:
         SVGA_Setup_ParadisePVGA1A();
+        break;
+    case SVGA_ATI:
+        SVGA_Setup_ATI();
         break;
     default:
         if (IS_JEGA_ARCH) SVGA_Setup_JEGA();

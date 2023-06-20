@@ -275,11 +275,17 @@
 #else
 		{
 			int16_t bound_min, bound_max;
-			GetRMrw;GetEAa;
-			bound_min=(int16_t)LoadMw(eaa);
-			bound_max=(int16_t)LoadMw(eaa+2u);
-			if ( (((int16_t)*rmrw) < bound_min) || (((int16_t)*rmrw) > bound_max) ) {
-				EXCEPTION(5);
+			GetRMrw;
+			if (rm < 0xc0) { // r/m = memory
+				GetEAa;
+				bound_min=(int16_t)LoadMw(eaa);
+				bound_max=(int16_t)LoadMw(eaa+2u);
+				if ( (((int16_t)*rmrw) < bound_min) || (((int16_t)*rmrw) > bound_max) ) {
+					EXCEPTION(5);
+				}
+			}
+			else { // r/m = register, which is an illegal encoding
+				goto illegal_opcode;
 			}
 		}
 		break;
@@ -907,7 +913,9 @@
 #endif
 	CASE_W(0xc2)												/* RETN Iw */
 		{
+#if CPU_CORE < CPU_ARCHTYPE_80186
         opcode_c2:
+#endif
 			uint32_t old_esp = reg_esp;
 
 			try {
@@ -988,14 +996,18 @@
 #endif
 	CASE_W(0xca)												/* RETF Iw */
 		{
+#if CPU_CORE < CPU_ARCHTYPE_80186
         opcode_ca:
+#endif
 			Bitu words=Fetchw();
 			FillFlags();
 			CPU_RET(false,words,GETIP);
 			continue;
 		}
 	CASE_W(0xcb)												/* RETF */
+#if CPU_CORE < CPU_ARCHTYPE_80186
         opcode_cb:
+#endif
 		FillFlags();
 		CPU_RET(false,0,GETIP);
 		continue;
@@ -1084,7 +1096,7 @@
 		break;
 	CASE_B(0xd9)												/* FPU ESC 1 */
 		if (enable_fpu) {
-			FPU_ESC(1);
+			FPU_ESC_SIZE(1, !(core.opcode_index&OPCODE_SIZE));
 		}
 		else {
 			uint8_t rm=Fetchb();
@@ -1120,7 +1132,7 @@
 		break;
 	CASE_B(0xdd)												/* FPU ESC 5 */
 		if (enable_fpu) {
-			FPU_ESC(5);
+			FPU_ESC_SIZE(5, !(core.opcode_index&OPCODE_SIZE));
 		}
 		else {
 			uint8_t rm=Fetchb();
@@ -1268,7 +1280,9 @@
 		IO_WriteW(reg_dx,reg_ax);
 		break;
 	CASE_B(0xf0)												/* LOCK */
+#if CPU_CORE < CPU_ARCHTYPE_80186
         opcode_f0:
+#endif
 		REMEMBER_PREFIX(MP_NONE);
 // todo: make an option to show this
 //		LOG(LOG_CPU,LOG_NORMAL)("CPU:LOCK"); /* FIXME: see case D_LOCK in core_full/load.h */
@@ -1404,7 +1418,7 @@ do_cli:	if (CPU_CLI()) RUNEXCEPTION();
 		if (CPU_STI()) RUNEXCEPTION();
 #if CPU_PIC_CHECK
 		if (GETFLAG(IF) && PIC_IRQCheck) {
-            // NTS: Do not immmediately break execution, but set the cycle count to a minimal
+            // NTS: Do not immediately break execution, but set the cycle count to a minimal
             //      value so that if a CLI follows immediately the interrupt will be ignored.
             //
             //      It turns out on a 486 that STI+CLI (right next to each other) does not

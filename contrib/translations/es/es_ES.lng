@@ -1,6 +1,6 @@
 :DOSBOX-X:LANGUAGE:Spanish (Spain)
 :DOSBOX-X:CODEPAGE:858
-:DOSBOX-X:VERSION:0.83.25
+:DOSBOX-X:VERSION:2023.05.01
 :DOSBOX-X:REMARK:
 :AUTOEXEC_CONFIGFILE_HELP
 Las líneas de esta sección se iniciarán al inicio.
@@ -225,12 +225,6 @@ Slot vacío
 .
 :SLOT
 Slot
-.
-:PREVIOUS_PAGE
-< Pág anterior
-.
-:NEXT_PAGE
-Pág siguiente >
 .
 :SELECT_EVENT
 Elige evento a cambiar.
@@ -908,7 +902,7 @@ La sintaxis de este comando es una de las siguientes:
 
 ←[34;1mBOOT diskimg1.img [diskimg2.img ...] [-L letradeunidad]←[0m
 
-←[34;1mBOOT letradeunidad:←[0m
+←[34;1mBOOT letradeunidad: [-convertfat|-convertfatro|-noconvertfat]←[0m
 
 Nota: 
 Un archivo imagen con dos puntos a la izquierda (:) inicia en modo solo lectura si la opcion "proteger contra escritura con dos puntos iniciales" esta activada.
@@ -1267,6 +1261,107 @@ Parámetro(s) no válido(s).
 Debe especificar un número de puerto entre 1 y 9.
 
 .
+:PROGRAM_VHDMAKE_WRITERR
+Could not write to new VHD image "%s", aborting.
+
+.
+:PROGRAM_VHDMAKE_REMOVEERR
+Could not erase file "%s"
+
+.
+:PROGRAM_VHDMAKE_RENAME
+You'll have to manually rename the newly created VHD image.
+
+.
+:PROGRAM_VHDMAKE_SUCCESS
+New VHD image succesfully created. You can mount it with ←[34;1mIMGMOUNT←[0m.
+
+.
+:PROGRAM_VHDMAKE_ERROPEN
+Error, could not open image file "%s".
+
+.
+:PROGRAM_VHDMAKE_BADSIZE
+Bad VHD size specified, aborting!
+
+.
+:PROGRAM_VHDMAKE_FNEEDED
+A pre-existing VHD image can't be silently overwritten without -f option!
+
+.
+:PROGRAM_VHDMAKE_BADPARENT
+The parent VHD image "%s" can't be opened for linking, aborting!
+
+.
+:PROGRAM_VHDMAKE_NOINFO
+Couldn't query info for "%s".
+
+.
+:PROGRAM_VHDMAKE_BLOCKSTATS
+with %d/%d blocks allocated.
+
+.
+:PROGRAM_VHDMAKE_INFO
+VHD "%s" type is %s.
+Its virtual size is %.02f MB
+
+.
+:PROGRAM_VHDMAKE_CANTMERGE
+%s is not a Differencing disk, can't merge!
+
+.
+:PROGRAM_VHDMAKE_MERGEREPORT
+%d sectors in %d blocks from "%s" merged into "%s".
+
+.
+:PROGRAM_VHDMAKE_MERGENODELETE
+Couldn't remove snapshot "%s", you'll have to do it yourself!
+
+.
+:PROGRAM_VHDMAKE_MERGEOKDELETE
+Snapshot VHD merged and deleted.
+
+.
+:PROGRAM_VHDMAKE_MERGEFAILED
+Failure while merging, aborted!
+.
+:PROGRAM_VHDMAKE_MERGEWARNCORRUPTION
+Parent "%s" contents could be corrupted!
+
+.
+:PROGRAM_VHDMAKE_ABSPATH_WIN
+Warning: an absolute path to parent limits portability to Windows.
+Please prefer a path relative to differencing image file!
+
+.
+:PROGRAM_VHDMAKE_ABSPATH_UX
+ERROR: an absolute path to parent inhibits portability.
+Use a path relative to differencing image file!
+
+.
+:PROGRAM_VHDMAKE_HELP
+Creates Dynamic or Differencing VHD images, or converts raw images
+into Fixed VHD.
+←[32;1mVHDMAKE←[0m [-f] new.vhd size[BKMGT]
+←[32;1mVHDMAKE←[0m ←[34;1m-convert←[0m raw.hdd new.vhd
+←[32;1mVHDMAKE←[0m [-f] ←[34;1m-link←[0m parent.vhd new.vhd
+←[32;1mVHDMAKE←[0m ←[34;1m-merge←[0m delta.vhd
+←[32;1mVHDMAKE←[0m ←[34;1m-info←[0m a.vhd
+ -c | -convert  convert a raw hd image to Fixed VHD, renaming it to new.vhd
+ -l | -link     create a new Differencing VHD new.vhd and link it to the
+                pre-existing parent image parent.vhd
+ -f | -force    force overwriting a pre-existing image file
+ -i | -info     show useful informations about a.vhd image
+ -m | -merge    merge differencing delta.vhd to its parent
+ new.vhd        name of the new Dynamic VHD image to create
+ size           disk size (eventually with size unit, Bytes is implicit)
+When converting a raw disk image to Fixed VHD, it has to be partitioned with
+MBR scheme and formatted with FAT format.
+When creating a Dynamic VHD, its size must range from 3 MB to 2040 GB.
+The Dynamic VHD created is not partitioned nor formatted: to directly mount to
+a drive letter with ←[34;1mIMGMOUNT←[0m, please consider using ←[34;1mIMGMAKE←[0m instead.
+A merged snapshot VHD is automatically deleted if merge is successful.
+.
 :SHELL_CMD_TREE_ERROR
 No existen subdirectorios
 
@@ -1481,7 +1576,7 @@ El archivo %s ya existe.
 
 .
 :SHELL_CMD_DIR_BYTES_USED
-%5d Archivo(s) %17s Bytes
+%5d Archivo(s) %14s Bytes
 
 .
 :SHELL_CMD_DIR_BYTES_FREE
@@ -2148,17 +2243,18 @@ Muestra o cambia el código de página DOS actual.
 
 .
 :SHELL_CMD_CHCP_HELP_LONG
-CHCP [nnn]
+CHCP [nnn [archivo]]
+CHCP nnn[:[idioma]]
 
-  nnn   Especifica un nº de código de página.
+  nnn     Especifica un nº de código de página.
+  archivo Especifica un archivo de página de códigos.
+  idioma  Especifica un idioma correspondiente.
 
 Códigos de página compatibles para la salida de fuente TrueType:
 
-437,737,775,808,850,852,853,855,857,858,860-866,869,872,874,3021
+437,737,775,808,850,852,853,855-869,872,874,1250-1258,3021
 
-Páginas de códigos de Windows: 1250,1251,1252,1253,1254,1255,1256,1257,1258
-
-También páginas de códigos de doble byte incluyendo 932,936,949,950.
+También páginas de códigos de doble byte incluyendo 932,936,949,950/951.
 
 Las páginas de códigos personalizadas son compatibles al proporcionar archivos de páginas de códigos.
 
@@ -2580,8 +2676,14 @@ xBRZ
 :MENU:scaler_set_xbrz_bilinear
 xBRZ Bilineal
 .
+:MENU:set_titletext
+Establecer el texto de la barra de título...
+.
+:MENU:set_transparency
+Establecer transparencia...
+.
 :MENU:refresh_rate
-Tasa de refresco...
+Ajustar la tasa de refresco...
 .
 :MENU:VideoOutputMenu
 Salida de vídeo
@@ -2603,6 +2705,9 @@ OpenGL perfecto
 .
 :MENU:output_ttf
 Fuente TrueType
+.
+:MENU:output_gamelink
+Game Link
 .
 :MENU:doublescan
 Doublescan
@@ -2892,6 +2997,15 @@ Emulación de EMM386
 :MENU:dos_ems_false
 Desactivar emulación de EMS
 .
+:MENU:DOSDiskRateMenu
+Limitar la velocidad de transferencia del disco
+.
+:MENU:limit_hdd_rate
+Limite la tasa de datos del disco duro
+.
+:MENU:limit_floppy_rate
+Limite la velocidad de datos del disquete
+.
 :MENU:DOSWinMenu
 Aplicaciones de host
 .
@@ -3014,6 +3128,9 @@ Arrancar desde unidad
 .
 :MENU:drive_bootimg
 Arrancar desde imagen de disco
+.
+:MENU:drive_saveimg
+Guardar en imagen de disco
 .
 :MENU:HelpMenu
 Ayuda
@@ -3273,8 +3390,8 @@ Reiniciar instancia de DOSBox-X
 :MENU:restartconf
 Reiniciar DOSBox-X con archivo config...
 .
-:MENU:restartlang
-Reiniciar DOSBox-X con archivo de idioma...
+:MENU:loadlang
+Cargar archivo de idioma...
 .
 :MENU:auto_lock_mouse
 Autobloqueo de ratón

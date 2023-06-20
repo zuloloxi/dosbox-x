@@ -68,6 +68,7 @@ public:
 # endif
 
 bool lmsw_allow_clear_pe_bit = false;
+bool mask_stack_ptr_on_enter = false;
 
 bool enable_weitek = false;
 
@@ -90,10 +91,13 @@ extern bool dos_kernel_disabled;
 extern bool use_dynamic_core_with_paging;
 extern bool auto_determine_dynamic_core_paging;
 
-uint64_t rdtsc_adjust = 0;
+uint64_t rdtsc_count_base = 0;
+pic_tickindex_t rdtsc_pic_base = 0;
 
 bool cpu_double_fault_enable;
 bool cpu_triple_fault_reset;
+
+unsigned char cpu_custom_cpuid[12] = {0};
 
 /* SYSENTER/SYSEXIT */
 uint16_t cpu_sep_cs = 0;		/* MSR 0x174h value of CS */
@@ -114,12 +118,24 @@ CPU_Regs cpu_regs;
 CPUBlock cpu;
 Segments Segs;
 
-int64_t CPU_RDTSC_RAW_internal() {
-	return (int64_t)(PIC_FullIndex()*(double) (CPU_CycleAutoAdjust?70000:CPU_CycleMax));
-}
+uint64_t CPU_fixed_RDTSC_rate = 0;
 
 int64_t CPU_RDTSC() {
-	return (int64_t)(CPU_RDTSC_RAW_internal() + rdtsc_adjust);
+	pic_tickindex_t rate;
+
+	if (CPU_fixed_RDTSC_rate > (uint64_t)0)
+		rate = (pic_tickindex_t)CPU_fixed_RDTSC_rate;
+	else
+		rate = (pic_tickindex_t)(CPU_CycleAutoAdjust?70000:CPU_CycleMax);
+
+	return (int64_t)(((PIC_FullIndex()-rdtsc_pic_base)*rate)+rdtsc_count_base);
+}
+
+void RDTSC_rebase() {
+	if (CPU_CycleMax > 0) {
+		rdtsc_count_base = CPU_RDTSC();
+		rdtsc_pic_base = PIC_FullIndex();
+	}
 }
 
 /* [cpu] setting realbig16.
@@ -178,6 +194,7 @@ int64_t CPU_RDTSC() {
  *
  *             --J.C. */
 bool cpu_allow_big16 = false;
+bool dos_clear_tf_on_int01 = false;
 
 cpu_cycles_count_t CPU_Cycles = 0;
 cpu_cycles_count_t CPU_CycleLeft = 3000;
@@ -388,14 +405,21 @@ int GetDynamicType() {
 #endif
 }
 
+#if (C_DYNAMIC_X86) && (C_DYNREC)
+#define BOTH_DYNAMIC 1
+#else
+#define BOTH_DYNAMIC 0
+#endif
+
 void menu_update_dynamic() {
+#if (C_DYNAMIC_X86) || (C_DYNREC)
 	const Section_prop * cpu_section = static_cast<Section_prop *>(control->GetSection("cpu"));
     std::string core(cpu_section->Get_string("core"));
     std::string text = mainMenu.get_item("mapper_dynamic").get_text();
     size_t found = text.find_last_of(" ");
     if (found != std::string::npos && text.substr(found+1).size() && *text.substr(found+1).c_str() == '(') text = text.substr(0, found);
 #if (C_DYNREC)
-    if ((core == "dynamic" && GetDynamicType()==2) || core == "dynamic_rec" || save_dynamic_rec) {
+    if ((core == "dynamic" && GetDynamicType()==2) || core == "dynamic_rec" || save_dynamic_rec || !BOTH_DYNAMIC) {
         save_dynamic_rec = true;
         mainMenu.get_item("mapper_dynamic").set_text(text+" (dynamic_rec)");
     } else
@@ -404,6 +428,7 @@ void menu_update_dynamic() {
         save_dynamic_rec = false;
         mainMenu.get_item("mapper_dynamic").set_text(text+" (dynamic_x86)");
     }
+#endif
 }
 
 void menu_update_core(void) {
@@ -1107,6 +1132,10 @@ void On_Software_CPU_Reset();
 void CPU_Exception(Bitu which,Bitu error ) {
 	assert(which < 0x20);
 //	LOG_MSG("Exception %d error %x",which,error);
+
+	if(which >= 0x20)
+		E_Exit("CPU_Exception: Exception %d is out of range.", (int)which);
+
 	if (CPU_Exception_Level[which] != 0) {
 		if (CPU_Exception_Level[EXCEPTION_DF] != 0 && cpu_triple_fault_reset) {
 			if (always_report_triple_fault || !has_printed_triple_fault) {
@@ -1129,16 +1158,16 @@ void CPU_Exception(Bitu which,Bitu error ) {
 	}
 
 	if (cpu_double_fault_enable) {
-        /* NTS: Putting some thought into it, I don't think divide by zero counts as something to throw a double fault
-         *      over. I may be wrong. The behavior of Intel processors will ultimately decide.
-         *
-         *      Until then, don't count Divide Overflow exceptions, so that the "EFP loader" can do it's disgusting
-         *      anti-debugger hackery when loading parts of a demo. --J.C. */
-        if (!(which == 0/*divide by zero/overflow*/)) {
-            /* CPU_Interrupt() could cause another fault during memory access. This needs to happen here */
-            CPU_Exception_Level[which]++;
-            CPU_Exception_In_Progress.push((int)which);
-        }
+		/* NTS: Putting some thought into it, I don't think divide by zero counts as something to throw a double fault
+		 *      over. I may be wrong. The behavior of Intel processors will ultimately decide.
+		 *
+		 *      Until then, don't count Divide Overflow exceptions, so that the "EFP loader" can do it's disgusting
+		 *      anti-debugger hackery when loading parts of a demo. --J.C. */
+		if (!(which == 0/*divide by zero/overflow*/)) {
+			/* CPU_Interrupt() could cause another fault during memory access. This needs to happen here */
+			CPU_Exception_Level[which]++;
+			CPU_Exception_In_Progress.push((int)which);
+		}
 	}
 
 	cpu.exception.error=error;
@@ -1392,7 +1421,7 @@ void CPU_Interrupt(Bitu num,Bitu type,uint32_t oldeip) {
 						E_Exit("Non-conforming intra privilege INT with DPL!=CPL");
 				case DESC_CODE_N_C_A:	case DESC_CODE_N_C_NA:
 				case DESC_CODE_R_C_A:	case DESC_CODE_R_C_NA:
-					/* Prepare stack for gate to same priviledge */
+					/* Prepare stack for gate to same privilege */
 					CPU_CHECK_COND(!cs_desc.saved.seg.p,
 							"INT:Same level:CS segment not present",
 						EXCEPTION_NP,(gate_sel & 0xfffc)+((type&CPU_INT_SOFTWARE)?0:1))
@@ -1983,7 +2012,7 @@ call_code:
 				switch (n_cs_desc.Type()) {
 				case DESC_CODE_N_NC_A:case DESC_CODE_N_NC_NA:
 				case DESC_CODE_R_NC_A:case DESC_CODE_R_NC_NA:
-					/* Check if we goto inner priviledge */
+					/* Check if we goto inner privilege */
 					if (n_cs_dpl < cpu.cpl) {
 						/* Get new SS:ESP out of TSS */
                         uint16_t n_ss_sel;
@@ -2152,24 +2181,30 @@ void CPU_RET(bool use32,Bitu bytes,uint32_t oldeip) {
 
 	if (!cpu.pmode || (reg_flags & FLAG_VM)) {
 		try {
-		uint32_t new_ip;
-        uint16_t new_cs;
-		if (!use32) {
-			new_ip=CPU_Pop16();
-			new_cs=CPU_Pop16();
-		} else {
-			new_ip=CPU_Pop32();
-			new_cs=CPU_Pop32() & 0xffff;
-		}
-		reg_esp+=(uint32_t)bytes;
-		SegSet16(cs,new_cs);
-		reg_eip=new_ip;
-		if (!cpu_allow_big16) cpu.code.big=false;
-		return;
+			uint32_t new_ip;
+			uint16_t new_cs;
+			if (!use32) {
+				new_ip=CPU_Pop16();
+				new_cs=CPU_Pop16();
+			} else {
+				new_ip=CPU_Pop32();
+				new_cs=CPU_Pop32() & 0xffff;
+			}
+
+			/* NTS: It is very important not to modify the full 32 bits in real mode.
+			 *      Finster by Mad Scientists (1996) likes to execute "RETF FFFEh" but
+			 *      will break if the upper 16 bits of ESP are made nonzero. I'm guessing
+			 *      the RETF used in that way is an elaborate way of adding 2 to the stack
+			 *      pointer instead of subtracting. --Jonathan C. */
+			reg_esp=(reg_esp&cpu.stack.notmask)|((reg_esp+(uint32_t)bytes)&cpu.stack.mask);
+			SegSet16(cs,new_cs);
+			reg_eip=new_ip;
+			if (!cpu_allow_big16) cpu.code.big=false;
+			return;
 		}
 		catch (const GuestPageFaultException &pf) {
-            (void)pf;//UNUSED
-            LOG_MSG("CPU_RET() interrupted real/vm86");
+			(void)pf;//UNUSED
+			LOG_MSG("CPU_RET() interrupted real/vm86");
 			reg_esp = orig_esp;
 			throw;
 		}
@@ -2352,7 +2387,6 @@ RET_same_level:
 			return;
 		}
 		LOG(LOG_CPU,LOG_NORMAL)("Prot ret %lX:%lX",(unsigned long)selector,(unsigned long)offset);
-		return;
 	}
 	assert(1);
 }
@@ -2977,97 +3011,107 @@ bool CPU_PopSeg(SegNames seg,bool use32) {
 extern bool enable_fpu;
 
 bool CPU_CPUID(void) {
+	/* NTS: This function must return false ONLY if CPUID is not supported.
+	 *      Otherwise, it must always return true even if it doesn't recognize
+	 *      the value of reg_eax. */
 	if (CPU_ArchitectureType < CPU_ARCHTYPE_486NEW) return false;
+
 	switch (reg_eax) {
-	case 0:	/* Vendor ID String and maximum level? */
-		reg_eax=1;  /* Maximum level */ 
-		reg_ebx='G' | ('e' << 8) | ('n' << 16) | ('u'<< 24); 
-		reg_edx='i' | ('n' << 8) | ('e' << 16) | ('I'<< 24); 
-		reg_ecx='n' | ('t' << 8) | ('e' << 16) | ('l'<< 24); 
-		break;
-	case 1:	/* get processor type/family/model/stepping and feature flags */
-		if ((CPU_ArchitectureType == CPU_ARCHTYPE_486NEW) ||
-			(CPU_ArchitectureType == CPU_ARCHTYPE_MIXED)) {
-			reg_eax=enable_fpu?0x402:0x422; /* intel 486dx or 486sx */
-			reg_ebx=0;			/* Not Supported */
-			reg_ecx=0;			/* No features */
-			reg_edx=enable_fpu?1:0;	/* FPU */
-		} else if (CPU_ArchitectureType == CPU_ARCHTYPE_PENTIUM) {
-			reg_eax=report_fdiv_bug?0x513:0x517;	/* intel pentium */
-			reg_ebx=0;			/* Not Supported */
-			reg_ecx=0;			/* No features */
-			reg_edx=0x00000010|(enable_fpu?1:0);	/* FPU+TimeStamp/RDTSC */
-			if (enable_msr) reg_edx |= 0x20; /* ModelSpecific/MSR */
-			if (enable_cmpxchg8b) reg_edx |= 0x100; /* CMPXCHG8B */
-		} else if (CPU_ArchitectureType == CPU_ARCHTYPE_PMMXSLOW) {
-			reg_eax=0x543;		/* intel pentium mmx (PMMX) */
-			reg_ebx=0;			/* Not Supported */
-			reg_ecx=0;			/* No features */
-			reg_edx=0x00800010|(enable_fpu?1:0);	/* FPU+TimeStamp/RDTSC+MMX+ModelSpecific/MSR */
-			if (enable_msr) reg_edx |= 0x20; /* ModelSpecific/MSR */
-			if (enable_cmpxchg8b) reg_edx |= 0x100; /* CMPXCHG8B */
-		} else if (CPU_ArchitectureType == CPU_ARCHTYPE_PPROSLOW) {
-			reg_eax=0x612;		/* intel pentium pro */
-			reg_ebx=0;			/* Not Supported */
-			reg_ecx=0;			/* No features */
-			reg_edx=0x00008011;	/* FPU+TimeStamp/RDTSC */
-			if (enable_msr) reg_edx |= 0x20; /* ModelSpecific/MSR */
-			if (enable_cmpxchg8b) reg_edx |= 0x100; /* CMPXCHG8B */
-		} else if (CPU_ArchitectureType == CPU_ARCHTYPE_PENTIUMII) {
-			/* NTS: Most operating systems will not attempt SYSENTER/SYSEXIT unless this returns model 3, stepping 3, or higher. */
-			/* From Intel [https://www.intel.com/content/dam/www/public/us/en/documents/manuals/64-ia-32-architectures-software-developer-vol-2b-manual.pdf]:
-			 *
-			 * "The SYSENTER and SYSEXIT instructions were introduced into the IA-32 architecture in the Pentium II processor."
-			 *
-			 * "An operating system that qualifies the SEP flag must also qualify the processor family and model to ensure that
-			 * the SYSENTER/SYSEXIT instructions are actually present"
-			 *
-			 * "When the CPUID instruction is executed on the Pentium Pro processor (model 1), the processor returns a the SEP
-			 * flag as set, but does not support the SYSENTER/SYSEXIT instructions."
-			 *
-			 * Therefore, always return with bit 11 (SEP) set whether or not SYSCALL is enabled because Intel made a stupid mistake.
-			 *
-			 * This website [https://www.geoffchappell.com/studies/windows/km/cpu/sep.htm?tx=256] notes how the Windows NT kernel
-			 * follows this rule, and the Linux kernel does too */
-			reg_eax=enable_syscall?0x633:0x631; /* intel pentium II */
-			reg_ebx=0;			/* Not Supported */
-			reg_ecx=0;			/* No features */
-			reg_edx=0x00808011;	/* FPU+TimeStamp/RDTSC */
-			if (enable_msr) reg_edx |= 0x20; /* ModelSpecific/MSR */
-			if (enable_cmpxchg8b) reg_edx |= 0x100; /* CMPXCHG8B */
-			reg_edx |= 0x800; /* SEP Fast System Call aka SYSENTER/SYSEXIT [SEE NOTES AT TOP OF THIS IF STATEMENT] */
-		} else if (CPU_ArchitectureType == CPU_ARCHTYPE_PENTIUMIII || CPU_ArchitectureType == CPU_ARCHTYPE_EXPERIMENTAL) {
-			reg_eax=0x673; /* intel pentium III */
-			reg_ebx=0;			/* Not Supported */
-			reg_ecx=0;			/* No features */
-			reg_edx=0x03808011;	/* FPU+TimeStamp/RDTSC+SSE+FXSAVE/FXRESTOR */
-			if (enable_msr) reg_edx |= 0x20; /* ModelSpecific/MSR */
-			if (enable_cmpxchg8b) reg_edx |= 0x100; /* CMPXCHG8B */
-			if (CPU_ArchitectureType == CPU_ARCHTYPE_PENTIUMIII && p3psn.enabled) reg_edx |= 0x40000;
-			reg_edx |= 0x800; /* SEP Fast System Call aka SYSENTER/SYSEXIT */
-		} else {
-			return false;
-		}
-		break;
-	case 3: /* Processor Serial Number */
-		if (CPU_ArchitectureType == CPU_ARCHTYPE_PENTIUMIII && p3psn.enabled) {
-			reg_eax = 0;
-			reg_ebx = 0;
-			reg_ecx = p3psn.lo;
-			reg_edx = p3psn.hi;
-		}
-		else {
-			return false;
-		}
-		break;
-	default:
-		LOG(LOG_CPU,LOG_ERROR)("Unhandled CPUID Function %x",reg_eax);
-		reg_eax=0;
-		reg_ebx=0;
-		reg_ecx=0;
-		reg_edx=0;
-		break;
+		case 0:	/* Vendor ID String and maximum level? */
+			if (CPU_ArchitectureType == CPU_ARCHTYPE_PENTIUMIII)
+				reg_eax=3;  /* Maximum level */
+			else
+				reg_eax=1;  /* Maximum level */
+			if (cpu_custom_cpuid[0] != 0) {
+				reg_ebx=cpu_custom_cpuid[0] | (cpu_custom_cpuid[1] << 8) | (cpu_custom_cpuid[ 2] << 16) | (cpu_custom_cpuid[ 3] << 24);
+				reg_edx=cpu_custom_cpuid[4] | (cpu_custom_cpuid[5] << 8) | (cpu_custom_cpuid[ 6] << 16) | (cpu_custom_cpuid[ 7] << 24);
+				reg_ecx=cpu_custom_cpuid[8] | (cpu_custom_cpuid[9] << 8) | (cpu_custom_cpuid[10] << 16) | (cpu_custom_cpuid[11] << 24);
+			}
+			else {
+				reg_ebx='G' | ('e' << 8) | ('n' << 16) | ('u'<< 24);
+				reg_edx='i' | ('n' << 8) | ('e' << 16) | ('I'<< 24);
+				reg_ecx='n' | ('t' << 8) | ('e' << 16) | ('l'<< 24);
+			}
+			break;
+		case 1:	/* get processor type/family/model/stepping and feature flags */
+			if ((CPU_ArchitectureType == CPU_ARCHTYPE_486NEW) ||
+					(CPU_ArchitectureType == CPU_ARCHTYPE_MIXED)) {
+				reg_eax=enable_fpu?0x402:0x422; /* intel 486dx or 486sx */
+				reg_ebx=0;			/* Not Supported */
+				reg_ecx=0;			/* No features */
+				reg_edx=enable_fpu?1:0;	/* FPU */
+			} else if (CPU_ArchitectureType == CPU_ARCHTYPE_PENTIUM) {
+				reg_eax=report_fdiv_bug?0x513:0x517;	/* intel pentium */
+				reg_ebx=0;			/* Not Supported */
+				reg_ecx=0;			/* No features */
+				reg_edx=0x00000010|(enable_fpu?1:0);	/* FPU+TimeStamp/RDTSC */
+				if (enable_msr) reg_edx |= 0x20; /* ModelSpecific/MSR */
+				if (enable_cmpxchg8b) reg_edx |= 0x100; /* CMPXCHG8B */
+			} else if (CPU_ArchitectureType == CPU_ARCHTYPE_PMMXSLOW) {
+				reg_eax=0x543;		/* intel pentium mmx (PMMX) */
+				reg_ebx=0;			/* Not Supported */
+				reg_ecx=0;			/* No features */
+				reg_edx=0x00800010|(enable_fpu?1:0);	/* FPU+TimeStamp/RDTSC+MMX+ModelSpecific/MSR */
+				if (enable_msr) reg_edx |= 0x20; /* ModelSpecific/MSR */
+				if (enable_cmpxchg8b) reg_edx |= 0x100; /* CMPXCHG8B */
+			} else if (CPU_ArchitectureType == CPU_ARCHTYPE_PPROSLOW) {
+				reg_eax=0x612;		/* intel pentium pro */
+				reg_ebx=0;			/* Not Supported */
+				reg_ecx=0;			/* No features */
+				reg_edx=0x00008011;	/* FPU+TimeStamp/RDTSC */
+				if (enable_msr) reg_edx |= 0x20; /* ModelSpecific/MSR */
+				if (enable_cmpxchg8b) reg_edx |= 0x100; /* CMPXCHG8B */
+			} else if (CPU_ArchitectureType == CPU_ARCHTYPE_PENTIUMII) {
+				/* NTS: Most operating systems will not attempt SYSENTER/SYSEXIT unless this returns model 3, stepping 3, or higher. */
+				/* From Intel [https://www.intel.com/content/dam/www/public/us/en/documents/manuals/64-ia-32-architectures-software-developer-vol-2b-manual.pdf]:
+				 *
+				 * "The SYSENTER and SYSEXIT instructions were introduced into the IA-32 architecture in the Pentium II processor."
+				 *
+				 * "An operating system that qualifies the SEP flag must also qualify the processor family and model to ensure that
+				 * the SYSENTER/SYSEXIT instructions are actually present"
+				 *
+				 * "When the CPUID instruction is executed on the Pentium Pro processor (model 1), the processor returns a the SEP
+				 * flag as set, but does not support the SYSENTER/SYSEXIT instructions."
+				 *
+				 * Therefore, always return with bit 11 (SEP) set whether or not SYSCALL is enabled because Intel made a stupid mistake.
+				 *
+				 * This website [https://www.geoffchappell.com/studies/windows/km/cpu/sep.htm?tx=256] notes how the Windows NT kernel
+				 * follows this rule, and the Linux kernel does too */
+				reg_eax=enable_syscall?0x633:0x631; /* intel pentium II */
+				reg_ebx=0;			/* Not Supported */
+				reg_ecx=0;			/* No features */
+				reg_edx=0x00808011;	/* FPU+TimeStamp/RDTSC */
+				if (enable_msr) reg_edx |= 0x20; /* ModelSpecific/MSR */
+				if (enable_cmpxchg8b) reg_edx |= 0x100; /* CMPXCHG8B */
+				reg_edx |= 0x800; /* SEP Fast System Call aka SYSENTER/SYSEXIT [SEE NOTES AT TOP OF THIS IF STATEMENT] */
+			} else if (CPU_ArchitectureType == CPU_ARCHTYPE_PENTIUMIII || CPU_ArchitectureType == CPU_ARCHTYPE_EXPERIMENTAL) {
+				reg_eax=0x673; /* intel pentium III */
+				reg_ebx=0;			/* Not Supported */
+				reg_ecx=0;			/* No features */
+				reg_edx=0x03808011;	/* FPU+TimeStamp/RDTSC+SSE+FXSAVE/FXRESTOR */
+				if (enable_msr) reg_edx |= 0x20; /* ModelSpecific/MSR */
+				if (enable_cmpxchg8b) reg_edx |= 0x100; /* CMPXCHG8B */
+				if (CPU_ArchitectureType == CPU_ARCHTYPE_PENTIUMIII && p3psn.enabled) reg_edx |= 0x40000;
+				reg_edx |= 0x800; /* SEP Fast System Call aka SYSENTER/SYSEXIT */
+			}
+			break;
+		case 3: /* Processor Serial Number */
+			if (CPU_ArchitectureType == CPU_ARCHTYPE_PENTIUMIII && p3psn.enabled) {
+				reg_eax = 0;
+				reg_ebx = 0;
+				reg_ecx = p3psn.lo;
+				reg_edx = p3psn.hi;
+			}
+			break;
+		default:
+			LOG(LOG_CPU,LOG_ERROR)("Unhandled CPUID Function %x",reg_eax);
+			reg_eax=0;
+			reg_ebx=0;
+			reg_ecx=0;
+			reg_edx=0;
+			break;
 	}
+
 	return true;
 }
 
@@ -3115,8 +3159,13 @@ void CPU_ENTER(bool use32,Bitu bytes,Bitu level) {
 		}
 	} else {
 		sp_index-=4;
-        mem_writed(SegPhys(ss)+sp_index,reg_ebp);
-		reg_ebp=(reg_esp-4);
+		mem_writed(SegPhys(ss)+sp_index,reg_ebp);
+
+		/* If 16-bit real mode or stack is 16-bit, even with 66h prefix, mask EBP by 0xFFFF (Fix for Finster by Mad Scientists, 1996).
+		 * This is not how Intel processors work, as verified on real 486 hardware. Unsurprisingly, Finster does not appear to run
+		 * properly on real hardware either, though I can't get the game to get that far. --Jonathan C. */
+		reg_ebp=(reg_esp-4)&(mask_stack_ptr_on_enter?cpu.stack.mask:0xFFFFFFFF);
+
 		if (level) {
 			for (Bitu i=1;i<level;i++) {	
 				sp_index-=4;bp_index-=4;
@@ -3127,7 +3176,7 @@ void CPU_ENTER(bool use32,Bitu bytes,Bitu level) {
 		}
 	}
 	sp_index-=(uint32_t)bytes;
-	reg_esp=(reg_esp&cpu.stack.notmask)|((sp_index)&cpu.stack.mask);
+	reg_esp=(reg_esp&cpu.stack.notmask)|(sp_index&cpu.stack.mask);
 }
 
 void CPU_SyncCycleMaxToProp(void) {
@@ -3150,6 +3199,7 @@ void CPU_CycleIncrease(bool pressed) {
 		LOG_MSG("CPU speed: max %ld percent.",(unsigned long)CPU_CyclePercUsed);
 		GFX_SetTitle((int32_t)CPU_CyclePercUsed,-1,-1,false);
 	} else {
+		RDTSC_rebase();
 		int32_t old_cycles= (int32_t)CPU_CycleMax;
 		if (CPU_CycleUp < 100) {
 			CPU_CycleMax = (int32_t)(CPU_CycleMax * (1 + (float)CPU_CycleUp / 100.0));
@@ -3187,6 +3237,7 @@ void CPU_CycleDecrease(bool pressed) {
 			LOG_MSG("CPU speed: max %ld percent.",(unsigned long)CPU_CyclePercUsed);
 		GFX_SetTitle((int32_t)CPU_CyclePercUsed,-1,-1,false);
 	} else {
+		RDTSC_rebase();
 		if (CPU_CycleDown < 100) {
 			CPU_CycleMax = (int32_t)(CPU_CycleMax / (1 + (float)CPU_CycleDown / 100.0));
 		} else {
@@ -3271,6 +3322,7 @@ static void CPU_ToggleDynamicCore(bool pressed) {
 
 void CPU_Enable_SkipAutoAdjust(void) {
 	if (CPU_CycleAutoAdjust) {
+		RDTSC_rebase();
 		CPU_CycleMax /= 2;
 		if (CPU_CycleMax < CPU_CYCLES_LOWER_LIMIT)
 			CPU_CycleMax = CPU_CYCLES_LOWER_LIMIT;
@@ -3311,29 +3363,29 @@ public:
 };
 
 uint8_t Weitek_PageHandler::readb(PhysPt addr) {
-    LOG_MSG("Weitek stub: readb at 0x%lx",(unsigned long)addr);
+	LOG_MSG("Weitek stub: readb at 0x%lx",(unsigned long)addr);
 	return (uint8_t)-1;
 }
 void Weitek_PageHandler::writeb(PhysPt addr,uint8_t val) {
-    LOG_MSG("Weitek stub: writeb at 0x%lx val=0x%lx",(unsigned long)addr,(unsigned long)val);
+	LOG_MSG("Weitek stub: writeb at 0x%lx val=0x%lx",(unsigned long)addr,(unsigned long)val);
 }
 
 uint16_t Weitek_PageHandler::readw(PhysPt addr) {
-    LOG_MSG("Weitek stub: readw at 0x%lx",(unsigned long)addr);
+	LOG_MSG("Weitek stub: readw at 0x%lx",(unsigned long)addr);
 	return (uint16_t)-1;
 }
 
 void Weitek_PageHandler::writew(PhysPt addr,uint16_t val) {
-    LOG_MSG("Weitek stub: writew at 0x%lx val=0x%lx",(unsigned long)addr,(unsigned long)val);
+	LOG_MSG("Weitek stub: writew at 0x%lx val=0x%lx",(unsigned long)addr,(unsigned long)val);
 }
 
 uint32_t Weitek_PageHandler::readd(PhysPt addr) {
-    LOG_MSG("Weitek stub: readd at 0x%lx",(unsigned long)addr);
+	LOG_MSG("Weitek stub: readd at 0x%lx",(unsigned long)addr);
 	return (uint32_t)-1;
 }
 
 void Weitek_PageHandler::writed(PhysPt addr,uint32_t val) {
-    LOG_MSG("Weitek stub: writed at 0x%lx val=0x%lx",(unsigned long)addr,(unsigned long)val);
+	LOG_MSG("Weitek stub: writed at 0x%lx val=0x%lx",(unsigned long)addr,(unsigned long)val);
 }
 
 Weitek_PageHandler weitek_pagehandler(0);
@@ -3518,6 +3570,7 @@ public:
 		ignore_opcode_63 = section->Get_bool("ignore opcode 63");
 		cpu_double_fault_enable = section->Get_bool("double fault");
 		cpu_triple_fault_reset = section->Get_bool("reset on triple fault");
+		dos_clear_tf_on_int01 = section->Get_bool("clear trap flag on unhandled int 1");
 		cpu_allow_big16 = section->Get_bool("realbig16");
 
 		const char *dynamic_core_paging = section->Get_string("use dynamic core with paging on");
@@ -3545,6 +3598,7 @@ public:
 		std::string str ;
 		CommandLine cmd(0,p->GetSection()->Get_string("parameters"));
 		if (type=="max") {
+			RDTSC_rebase();
 			CPU_CycleMax=0;
 			CPU_CyclePercUsed=100;
 			CPU_CycleAutoAdjust=true;
@@ -3570,6 +3624,7 @@ public:
 			}
 		} else {
 			if (type=="auto") {
+				RDTSC_rebase();
 				CPU_AutoDetermineMode|=CPU_AUTODETERMINE_CYCLES;
 				CPU_CycleMax=3000;
 				CPU_OldCycleMax=3000;
@@ -3595,6 +3650,7 @@ public:
 							std::istringstream stream(str);
 							stream >> rmdval;
 							if (rmdval>0) {
+								RDTSC_rebase();
 								CPU_CycleMax=(int32_t)rmdval;
 								CPU_OldCycleMax=(int32_t)rmdval;
 							}
@@ -3606,12 +3662,14 @@ public:
 				int rmdval=0;
 				std::istringstream stream(str);
 				stream >> rmdval;
+				RDTSC_rebase();
 				CPU_CycleMax=(int32_t)rmdval;
 			} else {
 				std::istringstream stream(type);
 				int rmdval=0;
 				stream >> rmdval;
 				if(rmdval) {
+					RDTSC_rebase();
 					CPU_CycleMax=(int32_t)rmdval;
 					CPU_CyclesSet=(int32_t)rmdval;
 				}
@@ -3793,7 +3851,25 @@ public:
 			CPU_ArchitectureType = CPU_ARCHTYPE_PENTIUMIII;
 		}
 
+		cpu_custom_cpuid[0] = 0;
+
+		CPU_fixed_RDTSC_rate = section->Get_int("rdtsc rate");
+
 		const char *fpus = section->Get_string("fpu");
+
+		{
+			size_t o=0;
+			const char *s = section->Get_string("cpuid string");
+			if (s != NULL && *s != 0) {
+				const char *os = s;
+
+				while (*s != 0 && o < 12) cpu_custom_cpuid[o++] = *s++;
+				while (o < 12) cpu_custom_cpuid[o++] = ' ';
+
+				if (*s != 0 && o == 12)
+					LOG_MSG("WARNING: CPUID string '%s' truncated. Maximum 12 characters",os);
+			}
+		}
 
 		if (CPU_ArchitectureType >= CPU_ARCHTYPE_486OLD)
 			FPU_ArchitectureType = FPU_ARCHTYPE_BEST;
@@ -3826,7 +3902,7 @@ public:
 				}
 			}
 			else if (CPU_ArchitectureType >= CPU_ARCHTYPE_286) {
-				if (FPU_ArchitectureType < FPU_ARCHTYPE_8087 || FPU_ArchitectureType > FPU_ARCHTYPE_387) {
+				if (FPU_ArchitectureType == FPU_ARCHTYPE_8087 || FPU_ArchitectureType > FPU_ARCHTYPE_387) {
 					LOG_MSG("WARNING: 286/386 with either 8087 or higher than 387 is an unusual combination");
 				}
 			}
@@ -3879,7 +3955,7 @@ public:
         pcpu_type = CPU_ArchitectureType;
 
 		if (CPU_ArchitectureType>=CPU_ARCHTYPE_486NEW) CPU_extflags_toggle=(FLAG_ID|FLAG_AC);
-		else if (CPU_ArchitectureType>=CPU_ARCHTYPE_486OLD) CPU_extflags_toggle=(FLAG_AC);
+		else if (CPU_ArchitectureType>=CPU_ARCHTYPE_486OLD) CPU_extflags_toggle=FLAG_AC;
 		else CPU_extflags_toggle=0;
 
 		const char *raw_psn = section->Get_string("processor serial number");
@@ -3950,6 +4026,7 @@ public:
 
 		if (cpu_rep_max < 0) cpu_rep_max = 4;	/* compromise to help emulation speed without too much loss of accuracy */
 
+		RDTSC_rebase();
 		if(CPU_CycleMax <= 0) CPU_CycleMax = 3000;
 		if(CPU_CycleUp <= 0)   CPU_CycleUp = 500;
 		if(CPU_CycleDown <= 0) CPU_CycleDown = 20;
@@ -3970,6 +4047,18 @@ public:
             LOG_MSG("CPU change requires guest system reboot");
             throw int(3);
         }
+
+		const char *mask_stack_ptr_enter_leave = section->Get_string("mask stack pointer for enter leave instructions");
+		if (!strcmp(mask_stack_ptr_enter_leave,"true") || !strcmp(mask_stack_ptr_enter_leave,"1")) {
+			mask_stack_ptr_on_enter = true;
+		}
+		else if (!strcmp(mask_stack_ptr_enter_leave,"false") || !strcmp(mask_stack_ptr_enter_leave,"0")) {
+			mask_stack_ptr_on_enter = false;
+		}
+		else {
+			/* auto, which is currently off */
+			mask_stack_ptr_on_enter = false;
+		}
 
 		const char *lmsw_allow_pe_clear = section->Get_string("allow lmsw to exit protected mode");
 		if (!strcmp(lmsw_allow_pe_clear,"true") || !strcmp(lmsw_allow_pe_clear,"1")) {
@@ -4042,13 +4131,13 @@ void CPU_OnReset(Section* sec) {
 		reg_eip=0xFFF0;
 		Segs.phys[cs]=0xFFFF0000;
 	}
-	else if (CPU_ArchitectureType >= CPU_ARCHTYPE_286) {
-		/* 286 start at F000:FFF0 (FFFF0) */
+	else if (CPU_ArchitectureType == CPU_ARCHTYPE_286) {
+		/* 286 starts at F000:FFF0 (FFFF0) */
 		SegSet16(cs,0xF000);
 		reg_eip=0xFFF0;
 	}
 	else {
-		/* 8086 start at FFFF:0000 (FFFF0) */
+		/* 8086 starts at FFFF:0000 (FFFF0) */
 		SegSet16(cs,0xFFFF);
 		reg_eip=0x0000;
 	}
@@ -4380,10 +4469,10 @@ bool CPU_RDMSR() {
 			UNBLOCKED_LOG(LOG_CPU,LOG_NORMAL)("RDMSR: Faking IA32 platform ID");
 			return true;
 		case 0x0000001b: /* Local APIC */
-			/* NTS: Windows ME assumes this MSR is present if we report ourself as a Pentium II,
+			/* NTS: Windows ME assumes this MSR is present if we report ourself as a Pentium II or Pentium Pro,
 			 *      instead of, you know, using CPUID */
 			/* NTS: Apparently the Linux kernel also assumes this register is present. */
-			if (CPU_ArchitectureType<CPU_ARCHTYPE_PENTIUMII) return false;
+			if (CPU_ArchitectureType<CPU_ARCHTYPE_PENTIUMII && !(CPU_ArchitectureType==CPU_ARCHTYPE_PPROSLOW)) return false;
 			reg_edx = reg_eax = 0;
 			UNBLOCKED_LOG(LOG_CPU,LOG_NORMAL)("RDMSR: Faking Local APIC");
 			return true;
@@ -4393,7 +4482,8 @@ bool CPU_RDMSR() {
 			UNBLOCKED_LOG(LOG_CPU,LOG_NORMAL)("RDMSR: MSR_IA32_EBL_CR_POWERON");
 			return true;
 		case 0x0000008b: /* Intel microcode revision... Windows ME insists on reading this at startup if Pentium II and stepping 3 */
-			if (CPU_ArchitectureType<CPU_ARCHTYPE_PENTIUMII) return false;
+			/* NTS: Windows 98 will also read this register on boot up if emulating a Pentium Pro */
+			if (CPU_ArchitectureType<CPU_ARCHTYPE_PENTIUMII && !(CPU_ArchitectureType==CPU_ARCHTYPE_PPROSLOW)) return false;
 			UNBLOCKED_LOG(LOG_CPU,LOG_NORMAL)("RDMSR: Guest is reading Intel microcode revision");
 			if (CPU_ArchitectureType >= CPU_ARCHTYPE_PENTIUMIII) {
 				// Taken from an actual Pentium III system. Windows ME will try to update microcode if major version is too low, this value stops that.
@@ -4475,8 +4565,8 @@ bool CPU_WRMSR() {
 
 	switch (reg_ecx) {
 		case 0x00000010: /* You can change the time stamp counter by writing this MSR */
-			rdtsc_adjust = ((uint64_t)reg_edx << (uint64_t)32ul) + (uint64_t)reg_eax;
-			rdtsc_adjust -= CPU_RDTSC_RAW_internal();
+			rdtsc_count_base = ((uint64_t)reg_edx << (uint64_t)32ul) + (uint64_t)reg_eax;
+			rdtsc_pic_base = PIC_FullIndex();
 			return true;
 		case 0x0000001b: /* Local APIC */
 			/* NTS: Windows ME assumes this MSR is present if we report ourself as a Pentium II,
@@ -4484,7 +4574,7 @@ bool CPU_WRMSR() {
 			 *      this register was 0x00000000 when it booted. Fortunately, Windows ME still
 			 *      runs properly if we silently ignore the write and leave it 0x00000000. */
 			/* NTS: Apparently the Linux kernel also assumes this register is present. */
-			if (CPU_ArchitectureType<CPU_ARCHTYPE_PENTIUMII) return false;
+			if (CPU_ArchitectureType<CPU_ARCHTYPE_PENTIUMII && !(CPU_ArchitectureType==CPU_ARCHTYPE_PPROSLOW)) return false;
 			UNBLOCKED_LOG(LOG_CPU,LOG_NORMAL)("WRMSR: Faking Local APIC");
 			if (reg_eax & 0x800) UNBLOCKED_LOG(LOG_CPU,LOG_WARN)("Guest OS is attempting to enable the Local APIC which we do not emulate yet");
 			return true;
@@ -4494,7 +4584,8 @@ bool CPU_WRMSR() {
 			UNBLOCKED_LOG(LOG_CPU,LOG_NORMAL)("WRMSR: Guest is attempting to update microcode (is that you Windows ME?) EDX:EAX=%08x:%08x",reg_edx,reg_eax);
 			return true;
 		case 0x0000008b: /* Intel microcode revision... why is Windows ME writing this register before reading it? */
-			if (CPU_ArchitectureType<CPU_ARCHTYPE_PENTIUMII) return false;
+			/* NTS: Windows 98 will also write this register on boot up if emulating a Pentium Pro */
+			if (CPU_ArchitectureType<CPU_ARCHTYPE_PENTIUMII && !(CPU_ArchitectureType==CPU_ARCHTYPE_PPROSLOW)) return false;
 			UNBLOCKED_LOG(LOG_CPU,LOG_NORMAL)("WRMSR: Attempt to write Intel microcode revision (is that you Windows ME?) EDX:EAX=%08x:%08x",reg_edx,reg_eax);
 			return true;
 		case 0x000000ce: /* MSR_PLATFORM_INFO? */
@@ -4565,6 +4656,7 @@ void CPU_CMPXCHG8B(PhysPt eaa) {
 	/* Compare EDX:EAX with 64-bit DWORD at memaddr 'eaa'.
 	 * if they match, ZF=1 and write ECX:EBX to memaddr 'eaa'.
 	 * else, ZF=0 and load memaddr 'eaa' into EDX:EAX */
+	FillFlags();
 	if (reg_edx == hi && reg_eax == lo) {
 		mem_writed(eaa+(PhysPt)4,reg_ecx);
 		mem_writed(eaa,          reg_ebx);

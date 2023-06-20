@@ -31,6 +31,11 @@
 #include "resource.h"
 #endif
 
+#include <output/output_direct3d.h>
+#include <output/output_opengl.h>
+#include <output/output_surface.h>
+#include <output/output_ttf.h>
+
 #if C_DIRECT3D
 void d3d_init(void);
 #endif
@@ -43,6 +48,13 @@ void res_init(void), RENDER_Reset(void), UpdateOverscanMenu(void), GFX_SetTitle(
 
 extern int initgl, posx, posy;
 extern bool rtl, gbk, chinasea, window_was_maximized, dpi_aware_enable, isVirtualBox;
+
+void refreshExtChar() {
+    mainMenu.get_item("ttf_extcharset").enable(TTF_using()&&!IS_PC98_ARCH&&!IS_JEGA_ARCH&&enable_dbcs_tables);
+    if (dos.loaded_codepage == 936) mainMenu.get_item("ttf_extcharset").check(gbk).refresh_item(mainMenu);
+    else if (dos.loaded_codepage == 950 || dos.loaded_codepage == 951) mainMenu.get_item("ttf_extcharset").check(chinasea).refresh_item(mainMenu);
+    else mainMenu.get_item("ttf_extcharset").check(gbk&&chinasea).refresh_item(mainMenu);
+}
 
 std::string GetDefaultOutput() {
     static std::string output = "surface";
@@ -150,11 +162,22 @@ void change_output(int output) {
         break;
 #endif
 
+#if C_GAMELINK
+    case 12:
+        OUTPUT_GAMELINK_Select();
+        break;
+#endif
+
     default:
         LOG_MSG("SDL: Unsupported output device %d, switching back to surface",output);
         OUTPUT_SURFACE_Select();
         break;
     }
+
+#if C_GAMELINK
+    if (!OUTPUT_GAMELINK_InitTrackingMode() && sdl.desktop.want_type == SCREEN_GAMELINK) OUTPUT_SURFACE_Select();
+#endif
+
 
 #if C_OPENGL
     if (sdl.desktop.want_type != SCREEN_OPENGL) mainMenu.get_item("load_glsl_shader").enable(false).refresh_item(mainMenu);
@@ -199,9 +222,13 @@ void change_output(int output) {
         mainMenu.get_item("load_ttf_font").enable(sdl.desktop.want_type==SCREEN_TTF).refresh_item(mainMenu);
 #endif
 #if defined(USE_TTF)
-    if ((output==9||output==10)&&ttf.inUse) {
+    if ((output==10||output==11)&&ttf.inUse) {
         resetFontSize();
         resetreq = true;
+#if defined(HX_DOS)
+        PIC_AddEvent(ttfreset, 100);
+        mainMenu.setScale(1);
+#endif
     }
 #if defined(WIN32) && !defined(HX_DOS)
     HMENU sysmenu = GetSystemMenu(GetHWND(), TRUE);
@@ -211,6 +238,14 @@ void change_output(int output) {
     }
 #endif
     mainMenu.get_item("mapper_aspratio").enable(!TTF_using()).check(render.aspect).refresh_item(mainMenu);
+    mainMenu.get_item("video_ratio_1_1").enable(!TTF_using()).refresh_item(mainMenu);
+    mainMenu.get_item("video_ratio_3_2").enable(!TTF_using()).refresh_item(mainMenu);
+    mainMenu.get_item("video_ratio_4_3").enable(!TTF_using()).refresh_item(mainMenu);
+    mainMenu.get_item("video_ratio_16_9").enable(!TTF_using()).refresh_item(mainMenu);
+    mainMenu.get_item("video_ratio_16_10").enable(!TTF_using()).refresh_item(mainMenu);
+    mainMenu.get_item("video_ratio_18_10").enable(!TTF_using()).refresh_item(mainMenu);
+    mainMenu.get_item("video_ratio_original").enable(!TTF_using()).refresh_item(mainMenu);
+    mainMenu.get_item("video_ratio_set").enable(!TTF_using()).refresh_item(mainMenu);
     mainMenu.get_item("mapper_incsize").enable(TTF_using()).refresh_item(mainMenu);
     mainMenu.get_item("mapper_decsize").enable(TTF_using()).refresh_item(mainMenu);
     mainMenu.get_item("mapper_resetcolor").enable(TTF_using()).refresh_item(mainMenu);
@@ -231,7 +266,7 @@ void change_output(int output) {
     mainMenu.get_item("mapper_dbcssbcs").enable(TTF_using()&&!IS_PC98_ARCH&&!IS_JEGA_ARCH&&enable_dbcs_tables).check(dbcs_sbcs||IS_PC98_ARCH||IS_JEGA_ARCH).refresh_item(mainMenu);
     mainMenu.get_item("mapper_autoboxdraw").enable(TTF_using()&&!IS_PC98_ARCH&&!IS_JEGA_ARCH&&enable_dbcs_tables).check(autoboxdraw||IS_PC98_ARCH||IS_JEGA_ARCH).refresh_item(mainMenu);
     mainMenu.get_item("ttf_halfwidthkana").enable(TTF_using()&&!IS_PC98_ARCH&&!IS_JEGA_ARCH&&enable_dbcs_tables).check(halfwidthkana||IS_PC98_ARCH||IS_JEGA_ARCH).refresh_item(mainMenu);
-    mainMenu.get_item("ttf_extcharset").enable(TTF_using()&&!IS_PC98_ARCH&&!IS_JEGA_ARCH&&enable_dbcs_tables).check(dos.loaded_codepage==936?gbk:(dos.loaded_codepage==950||dos.loaded_codepage==951?chinasea:gbk&&chinasea)).refresh_item(mainMenu);
+    refreshExtChar();
 #endif
 
     if (output != 7) GFX_SetTitle((int32_t)(CPU_CycleAutoAdjust?CPU_CyclePercUsed:CPU_CycleMax),-1,-1,false);
@@ -252,6 +287,9 @@ void OutputSettingMenuUpdate(void) {
 #endif
 #if defined(USE_TTF)
     mainMenu.get_item("output_ttf").check(sdl.desktop.want_type == SCREEN_TTF).refresh_item(mainMenu);
+#endif
+#if C_GAMELINK
+    mainMenu.get_item("output_gamelink").check(sdl.desktop.want_type == SCREEN_GAMELINK).refresh_item(mainMenu);
 #endif
 }
 
@@ -369,6 +407,13 @@ bool toOutput(const char *what) {
             if (!control->opt_nomenu && static_cast<Section_prop *>(control->GetSection("sdl"))->Get_bool("showmenu")) DOSBox_SetMenu();
 #endif
         }
+#endif
+    }
+    else if (!strcmp(what,"gamelink")) {
+#if C_GAMELINK
+        if (sdl.desktop.want_type == SCREEN_GAMELINK) return false;
+        change_output(12);
+        reset = true;
 #endif
     }
     if (reset) RENDER_Reset();

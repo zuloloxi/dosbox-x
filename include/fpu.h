@@ -28,7 +28,7 @@
 void FPU_ESC0_Normal(Bitu rm);
 void FPU_ESC0_EA(Bitu rm,PhysPt addr);
 void FPU_ESC1_Normal(Bitu rm);
-void FPU_ESC1_EA(Bitu rm,PhysPt addr);
+void FPU_ESC1_EA(Bitu rm,PhysPt addr, bool op16);
 void FPU_ESC2_Normal(Bitu rm);
 void FPU_ESC2_EA(Bitu rm,PhysPt addr);
 void FPU_ESC3_Normal(Bitu rm);
@@ -36,7 +36,7 @@ void FPU_ESC3_EA(Bitu rm,PhysPt addr);
 void FPU_ESC4_Normal(Bitu rm);
 void FPU_ESC4_EA(Bitu rm,PhysPt addr);
 void FPU_ESC5_Normal(Bitu rm);
-void FPU_ESC5_EA(Bitu rm,PhysPt addr);
+void FPU_ESC5_EA(Bitu rm,PhysPt addr, bool op16);
 void FPU_ESC6_Normal(Bitu rm);
 void FPU_ESC6_EA(Bitu rm,PhysPt addr);
 void FPU_ESC7_Normal(Bitu rm);
@@ -106,7 +106,7 @@ static_assert( sizeof(FPU_Reg_32) == 4, "FPU_Reg_32 error" );
 #define FPU_Reg_32_exponent_bias	(127)
 static const uint32_t FPU_Reg_32_implied_bit = ((uint32_t)1UL << (uint32_t)23UL);
 
-typedef union alignas(8) MMX_reg {
+union alignas(8) MMX_reg {
 
 	uint64_t q;
 
@@ -193,7 +193,7 @@ typedef union alignas(8) MMX_reg {
 static_assert(sizeof(MMX_reg) == 8, "MMX packing error");
 
 #pragma pack(push,1)
-typedef union alignas(16) XMM_Reg {
+union alignas(16) XMM_Reg {
 	FPU_Reg_32		f32[4];
 	FPU_Reg_64		f64[2];
 
@@ -274,6 +274,7 @@ typedef struct {
     uint16_t d1;
     uint32_t d2;
 } FPU_P_Reg;
+static_assert( sizeof(FPU_P_Reg) == 16, "FPU_P_Reg error" );
 
 // memory barrier macro. to ensure that reads/stores to one half of the FPU reg struct
 // do not overlap with reads/stores from the other half. things can go wrong if the
@@ -298,8 +299,8 @@ struct RegBit
 {
 	enum { basemask = (1 << nbits) - 1 };
 	enum { mask = basemask << bitno };
-	T& data;
-	RegBit(T& reg) : data(reg) {}
+	T data;
+	RegBit(const T& reg) : data(reg) {}
 	template <class T2> RegBit& operator=(T2 val)
 	{
 		data = (data & ~mask) | ((nbits > 1 ? val & basemask : !!val) << bitno);
@@ -310,17 +311,20 @@ struct RegBit
 
 struct FPUControlWord
 {
-	uint16_t reg;
-	RegBit<FPUControlWord, 0>     IM;  // Invalid operation mask
-	RegBit<FPUControlWord, 1>     DM;  // Denormalized operand mask
-	RegBit<FPUControlWord, 2>     ZM;  // Zero divide mask
-	RegBit<FPUControlWord, 3>     OM;  // Overflow mask
-	RegBit<FPUControlWord, 4>     UM;  // Underflow mask
-	RegBit<FPUControlWord, 5>     PM;  // Precision mask
-	RegBit<FPUControlWord, 7>     M;   // Interrupt mask   (8087-only)
-	RegBit<FPUControlWord, 8, 2>  PC;  // Precision control
-	RegBit<FPUControlWord, 10, 2> RC;  // Rounding control
-	RegBit<FPUControlWord, 12>    IC;  // Infinity control (8087/80287-only)
+	union
+	{
+		uint16_t reg = initValue;
+		RegBit<decltype(reg), 0>     IM;  // Invalid operation mask
+		RegBit<decltype(reg), 1>     DM;  // Denormalized operand mask
+		RegBit<decltype(reg), 2>     ZM;  // Zero divide mask
+		RegBit<decltype(reg), 3>     OM;  // Overflow mask
+		RegBit<decltype(reg), 4>     UM;  // Underflow mask
+		RegBit<decltype(reg), 5>     PM;  // Precision mask
+		RegBit<decltype(reg), 7>     M;   // Interrupt mask   (8087-only)
+		RegBit<decltype(reg), 8, 2>  PC;  // Precision control
+		RegBit<decltype(reg), 10, 2> RC;  // Rounding control
+		RegBit<decltype(reg), 12>    IC;  // Infinity control (8087/80287-only)
+	};
 
 	enum
 	{
@@ -337,8 +341,7 @@ struct FPUControlWord
 		Chop    = 3
 	};
 
-	FPUControlWord() : reg(initValue), IM(*this), DM(*this), ZM(*this), OM(*this),
-					   UM(*this), PM(*this), M(*this), PC(*this), RC(*this), IC(*this) {}
+	FPUControlWord() {}
 	FPUControlWord(const FPUControlWord& other) = default;
 	FPUControlWord& operator=(const FPUControlWord& other)
 	{
@@ -372,26 +375,27 @@ struct FPUControlWord
 
 struct FPUStatusWord
 {
-	uint16_t reg;
-	RegBit<FPUStatusWord, 0>     IE;  // Invalid operation
-	RegBit<FPUStatusWord, 1>     DE;  // Denormalized operand
-	RegBit<FPUStatusWord, 2>     ZE;  // Divide-by-zero
-	RegBit<FPUStatusWord, 3>     OE;  // Overflow
-	RegBit<FPUStatusWord, 4>     UE;  // Underflow
-	RegBit<FPUStatusWord, 5>     PE;  // Precision
-	RegBit<FPUStatusWord, 6>     SF;  // Stack Flag (non-8087/802087)
-	RegBit<FPUStatusWord, 7>     IR;  // Interrupt request (8087-only)
-	RegBit<FPUStatusWord, 7>     ES;  // Error summary     (non-8087)
-	RegBit<FPUStatusWord, 8>     C0;  // Condition flag
-	RegBit<FPUStatusWord, 9>     C1;  // Condition flag
-	RegBit<FPUStatusWord, 10>    C2;  // Condition flag
-	RegBit<FPUStatusWord, 11, 3> top; // Top of stack pointer
-	RegBit<FPUStatusWord, 14>    C3;  // Condition flag
-	RegBit<FPUStatusWord, 15>    B;   // Busy flag
+	union
+	{
+		uint16_t reg = 0;
+		RegBit<decltype(reg), 0>     IE;  // Invalid operation
+		RegBit<decltype(reg), 1>     DE;  // Denormalized operand
+		RegBit<decltype(reg), 2>     ZE;  // Divide-by-zero
+		RegBit<decltype(reg), 3>     OE;  // Overflow
+		RegBit<decltype(reg), 4>     UE;  // Underflow
+		RegBit<decltype(reg), 5>     PE;  // Precision
+		RegBit<decltype(reg), 6>     SF;  // Stack Flag (non-8087/802087)
+		RegBit<decltype(reg), 7>     IR;  // Interrupt request (8087-only)
+		RegBit<decltype(reg), 7>     ES;  // Error summary     (non-8087)
+		RegBit<decltype(reg), 8>     C0;  // Condition flag
+		RegBit<decltype(reg), 9>     C1;  // Condition flag
+		RegBit<decltype(reg), 10>    C2;  // Condition flag
+		RegBit<decltype(reg), 11, 3> top; // Top of stack pointer
+		RegBit<decltype(reg), 14>    C3;  // Condition flag
+		RegBit<decltype(reg), 15>    B;   // Busy flag
+	};
 
-	FPUStatusWord() : reg(0), IE(*this), DE(*this), ZE(*this), OE(*this), UE(*this),
-	                  PE(*this), SF(*this), IR(*this), ES(*this), C0(*this), C1(*this),
-	                  C2(*this), top(*this), C3(*this), B(*this) {}
+	FPUStatusWord() {}
 	FPUStatusWord(const FPUStatusWord& other) = default;
 	FPUStatusWord& operator=(const FPUStatusWord& other)
 	{
@@ -459,7 +463,22 @@ typedef struct {
 
 extern FPU_rec fpu;
 
+// TOP = macro for use in C/C++ for top of FPU stack
+// FPUSW = macro for the entire FPU status word for use in dynamic core
+// NTS: DOSBox-X until 2023/03/11 and all other forks have dynamic core code that generates memory loads
+//      from (&TOP). That code is flawed because while you think you are loading the top of the stack,
+//      what you are actually doing is taking the address of a bitfield (which doesn't do what you think
+//      it does!) and generating code to read that address. Code that you think is using the FPU top of
+//      stack is in reality using the entire FPU status word as top of stack!
+//
+//      This issue has since been resolved by adding a right shift instruction after the load. To make
+//      what is actually happening clearer for development going forward, all dynamic core code has been
+//      changed to use &FPUSW instead of &TOP.
+//
+//      FPUSW is a macro that resolves to the "reg" union field which is a plain 16-bit unsigned integer
+//      containing all FPU status word bits.
 #define TOP fpu.sw.top
+#define FPUSW fpu.sw.reg
 #define STV(i)  ( (fpu.sw.top + (i) ) & 7 )
 
 

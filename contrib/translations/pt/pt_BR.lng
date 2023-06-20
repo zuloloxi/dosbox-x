@@ -1,6 +1,6 @@
 :DOSBOX-X:LANGUAGE:Portuguese (Brazil)
 :DOSBOX-X:CODEPAGE:860
-:DOSBOX-X:VERSION:0.83.25
+:DOSBOX-X:VERSION:2023.05.01
 :DOSBOX-X:REMARK:
 :AUTOEXEC_CONFIGFILE_HELP
 As linhas nesta seção serão sempre executadas ao se iniciar o DOSBox-X.
@@ -21,7 +21,7 @@ Valores possíveis
 Opções avançadas (ver arquivo de referência de configuração completo [dosbox-x.reference.full.conf] para mais detalhes)
 .
 :CONFIG_TOOL
-Ferramenta configuração do DOSBox-X
+Ferramenta de configuração do DOSBox-X
 .
 :CONFIG_TOOL_EXIT
 Sair da ferramenta de configuração
@@ -194,7 +194,7 @@ Nome do idioma (opcional):
 :INTRO_MESSAGE
 Bem-vindo ao DOSBox-X, um emulador de DOS completo e livre.
 O DOSBox-X cria um console DOS que funciona como um DOS real.
-Você também pode executar o Windows 3.x e 9x/Me dentro da máquina DOS.
+Você também pode executar o Windows 3.x/9x/Me dentro da máquina DOS.
 .
 :DRIVE
 Unidade
@@ -222,12 +222,6 @@ Compartimento vazio
 .
 :SLOT
 Compartimento
-.
-:PREVIOUS_PAGE
-< Pág. anterior
-.
-:NEXT_PAGE
-Próx. página >
 .
 :SELECT_EVENT
 Selecionar evento para alterar.
@@ -852,7 +846,7 @@ c:\jogosdos\[37m é um exemplo. Substitua por sua própria pasta de jogos.[37m
 :PROGRAM_INTRO_MOUNT_END
 Quando mount for completado corretamente você pode digitar [34;1mc:[0m para ir para
 sua unidade montada C:. Digite [34;1mdir[0m para mostrar seu conteúdo, [34;1mcd[0m permite
-que você entre em uma pasta (reconhecido pro [33;1m[][0m em uma pasta listada).
+que você entre em uma pasta (reconhecido por [33;1m[][0m em uma pasta listada).
 Você pode executar programas terminados em [31m.exe .bat[0m e [31m.com[0m.
 
 .
@@ -905,7 +899,7 @@ imagem deve estar previamente montada usando o comando [34;1mIMGMOUNT[0m.
 
 A sintaxe deste comando é uma das seguintes:
 
-[34;1mBOOT [letra_da_unidade:][0m
+[34;1mBOOT [letra_da_unidade:] [-convertfat|-convertfatro|-noconvertfat][0m
 [34;1mBOOT diskimg1.img [diskimg2.img ...] [-L letra_da_unidade][0m
 
 Nota: Um arquivo de imagem com dois pontos à esquerda (:) será inicializada com
@@ -1271,6 +1265,107 @@ Parâmetro(s) inválido(s).
 Deve especificar um número de porta entre 1 e 9.
 
 .
+:PROGRAM_VHDMAKE_WRITERR
+Could not write to new VHD image "%s", aborting.
+
+.
+:PROGRAM_VHDMAKE_REMOVEERR
+Could not erase file "%s"
+
+.
+:PROGRAM_VHDMAKE_RENAME
+You'll have to manually rename the newly created VHD image.
+
+.
+:PROGRAM_VHDMAKE_SUCCESS
+New VHD image succesfully created. You can mount it with [34;1mIMGMOUNT[0m.
+
+.
+:PROGRAM_VHDMAKE_ERROPEN
+Error, could not open image file "%s".
+
+.
+:PROGRAM_VHDMAKE_BADSIZE
+Bad VHD size specified, aborting!
+
+.
+:PROGRAM_VHDMAKE_FNEEDED
+A pre-existing VHD image can't be silently overwritten without -f option!
+
+.
+:PROGRAM_VHDMAKE_BADPARENT
+The parent VHD image "%s" can't be opened for linking, aborting!
+
+.
+:PROGRAM_VHDMAKE_NOINFO
+Couldn't query info for "%s".
+
+.
+:PROGRAM_VHDMAKE_BLOCKSTATS
+with %d/%d blocks allocated.
+
+.
+:PROGRAM_VHDMAKE_INFO
+VHD "%s" type is %s.
+Its virtual size is %.02f MB
+
+.
+:PROGRAM_VHDMAKE_CANTMERGE
+%s is not a Differencing disk, can't merge!
+
+.
+:PROGRAM_VHDMAKE_MERGEREPORT
+%d sectors in %d blocks from "%s" merged into "%s".
+
+.
+:PROGRAM_VHDMAKE_MERGENODELETE
+Couldn't remove snapshot "%s", you'll have to do it yourself!
+
+.
+:PROGRAM_VHDMAKE_MERGEOKDELETE
+Snapshot VHD merged and deleted.
+
+.
+:PROGRAM_VHDMAKE_MERGEFAILED
+Failure while merging, aborted!
+.
+:PROGRAM_VHDMAKE_MERGEWARNCORRUPTION
+Parent "%s" contents could be corrupted!
+
+.
+:PROGRAM_VHDMAKE_ABSPATH_WIN
+Warning: an absolute path to parent limits portability to Windows.
+Please prefer a path relative to differencing image file!
+
+.
+:PROGRAM_VHDMAKE_ABSPATH_UX
+ERROR: an absolute path to parent inhibits portability.
+Use a path relative to differencing image file!
+
+.
+:PROGRAM_VHDMAKE_HELP
+Creates Dynamic or Differencing VHD images, or converts raw images
+into Fixed VHD.
+[32;1mVHDMAKE[0m [-f] new.vhd size[BKMGT]
+[32;1mVHDMAKE[0m [34;1m-convert[0m raw.hdd new.vhd
+[32;1mVHDMAKE[0m [-f] [34;1m-link[0m parent.vhd new.vhd
+[32;1mVHDMAKE[0m [34;1m-merge[0m delta.vhd
+[32;1mVHDMAKE[0m [34;1m-info[0m a.vhd
+ -c | -convert  convert a raw hd image to Fixed VHD, renaming it to new.vhd
+ -l | -link     create a new Differencing VHD new.vhd and link it to the
+                pre-existing parent image parent.vhd
+ -f | -force    force overwriting a pre-existing image file
+ -i | -info     show useful informations about a.vhd image
+ -m | -merge    merge differencing delta.vhd to its parent
+ new.vhd        name of the new Dynamic VHD image to create
+ size           disk size (eventually with size unit, Bytes is implicit)
+When converting a raw disk image to Fixed VHD, it has to be partitioned with
+MBR scheme and formatted with FAT format.
+When creating a Dynamic VHD, its size must range from 3 MB to 2040 GB.
+The Dynamic VHD created is not partitioned nor formatted: to directly mount to
+a drive letter with [34;1mIMGMOUNT[0m, please consider using [34;1mIMGMAKE[0m instead.
+A merged snapshot VHD is automatically deleted if merge is successful.
+.
 :SHELL_CMD_TREE_ERROR
 Não existem subpastas
 
@@ -1489,11 +1584,11 @@ O arquivo %s já existe.
 
 .
 :SHELL_CMD_DIR_BYTES_USED
-%5d arquivo(s) %17s bytes
+%5d arquivo(s) %14s bytes
 
 .
 :SHELL_CMD_DIR_BYTES_FREE
-%5d pasta(s)  %17s bytes disponíveis
+%5d pasta(s) %16s bytes disponíveis
 
 .
 :SHELL_CMD_DIR_FILES_LISTED
@@ -2172,17 +2267,17 @@ Exibe ou define o número da página de código ativa.
 .
 :SHELL_CMD_CHCP_HELP_LONG
 CHCP [nnn [arquivo]]
+CHCP nnn[:[idioma]]
 
-  nnn   Define um número da página de código.
+  nnn      Define um número da página de código.
   arquivo  Especifica um arquivo de página de código.
+  idioma   Especifica um idioma correspondente.
 
 Páginas de código compatíveis para a saída de fonte TrueType:
 
-437,737,775,808,850,852,853,855,857,858,860-866,869,872,874,3021
+437,737,775,808,850,852,853,855-869,872,874,1250-1258,3021
 
-Páginas de códigos do Windows: 1250,1251,1252,1253,1254,1255,1256,1257,1258
-
-Também páginas de códigos de duplo byte includindo 932,936,949,950.
+Também páginas de códigos de duplo byte includindo 932,936,949,950/951.
 
 As páginas de códigos personalizadas são compatíveis ao proporcionar
 arquivos de páginas de códigos.
@@ -2359,7 +2454,7 @@ Selecionar tecla do anfitrião
 Movimentos da roda do mouse
 .
 :MENU:SharedClipboard
-Funções área de transferência compartilhada
+Funções de área de transferência compartilhada
 .
 :MENU:CpuMenu
 CPU
@@ -2482,7 +2577,7 @@ Desligado
 10 quadros
 .
 :MENU:VideoRatioMenu
-proporção da tela
+Proporção da tela
 .
 :MENU:video_ratio_1_1
 1:1
@@ -2503,7 +2598,7 @@ proporção da tela
 18:10
 .
 :MENU:video_ratio_original
-proporção original
+Proporção original
 .
 :MENU:video_ratio_set
 Definir proporção
@@ -2598,8 +2693,14 @@ xBRZ
 :MENU:scaler_set_xbrz_bilinear
 xBRZ Bilinear
 .
+:MENU:set_titletext
+Definir texto da barra de título...
+.
+:MENU:set_transparency
+Definir transparência...
+.
 :MENU:refresh_rate
-Taxa de atualização...
+Ajustar a taxa de atualização...
 .
 :MENU:VideoOutputMenu
 Saída de vídeo
@@ -2621,6 +2722,9 @@ OpenGL pixel perfeito
 .
 :MENU:output_ttf
 Fonte TrueType
+.
+:MENU:output_gamelink
+Game Link
 .
 :MENU:doublescan
 Dupla varredura
@@ -2910,6 +3014,15 @@ Emulação de EMM386
 :MENU:dos_ems_false
 Desativar emulação de EMS
 .
+:MENU:DOSDiskRateMenu
+Limitar a velocidade de transferência do disco
+.
+:MENU:limit_hdd_rate
+Limitar a taxa de dados do disco rígido
+.
+:MENU:limit_floppy_rate
+Limitar a taxa de dados do disquete
+.
 :MENU:DOSWinMenu
 Aplicativos do sistema anfitrião
 .
@@ -3032,6 +3145,9 @@ Inicializar da unidade
 .
 :MENU:drive_bootimg
 Inicializar da imagem de disco
+.
+:MENU:drive_saveimg
+Salvar na imagem do disco
 .
 :MENU:HelpMenu
 Ajuda
@@ -3291,8 +3407,8 @@ Reiniciar instância do DOSBox-X
 :MENU:restartconf
 Reiniciar o DOSBox-X com arquivo config...
 .
-:MENU:restartlang
-Reiniciar o DOSBox-X com arquivo de idioma...
+:MENU:loadlang
+Carregar arquivo de idioma...
 .
 :MENU:auto_lock_mouse
 Travar automaticamente mouse
@@ -3476,15 +3592,6 @@ Lançar prog. rápido
 .
 :MAPPER:reboot
 Reinicia sistema DOS
-.
-:MAPPER:recmtwave
-Gravar a M.T. AVI
-.
-:MAPPER:recvoldown
-Baixar vol. gravação
-.
-:MAPPER:recvolup
-Aumentar vol. gravação
 .
 :MAPPER:rescanall
 Reverificar unidades

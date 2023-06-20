@@ -20,6 +20,17 @@
 #ifndef DOSBOX_DOSBOX_H
 #define DOSBOX_DOSBOX_H
 
+#if !defined (WIN32)
+/* for mkdir_p, needed by emscripten */
+#include <sys/stat.h>
+#endif
+#include <algorithm>
+#include <functional>
+#include <map>
+#include <sstream>
+#include <vector>
+
+#include "clockdomain.h"
 #include "config.h"
 
 #if defined(C_ICONV)
@@ -71,19 +82,18 @@
 // TODO: The autoconf script should test the size of long double
 #if defined(_MSC_VER)
 // Microsoft C++ sizeof(long double) == sizeof(double)
-#elif defined(__arm__)
+#elif defined(__arm__) || defined(__aarch64__)
 // ARMv7 (Raspberry Pi) does not have long double, sizeof(long double) == sizeof(double)
+// ARM 64 has a quadruple-precision float instead of the 80-bit extended precision one used by x87
 #else
 // GCC, other compilers, have sizeof(long double) == 10 80-bit IEEE
-# define HAS_LONG_DOUBLE		1
+#define HAS_LONG_DOUBLE		1
 #endif
 
 GCC_ATTRIBUTE(noreturn) void		E_Exit(const char * format,...) GCC_ATTRIBUTE( __format__(__printf__, 1, 2));
 
 typedef Bits cpu_cycles_count_t;
 typedef Bitu cpu_cycles_countu_t;
-
-#include "clockdomain.h"
 
 class Config;
 class Section;
@@ -110,12 +120,19 @@ enum MachineType {
     MCH_MDA
 };
 
+enum HerculesCard {
+	HERC_GraphicsCard,
+	HERC_GraphicsCardPlus,
+	HERC_InColor
+};
+
 enum SVGACards {
 	SVGA_None,
 	SVGA_S3Trio,
 	SVGA_TsengET4K,
 	SVGA_TsengET3K,
-	SVGA_ParadisePVGA1A
+	SVGA_ParadisePVGA1A,
+	SVGA_ATI
 };
 
 enum S3Card {
@@ -135,11 +152,24 @@ enum S3Card {
     S3_ViRGEVX                       // ViRGE VX [http://hackipedia.org/browse.cgi/Computer/Platform/PC%2c%20IBM%20compatible/Video/VGA/SVGA/S3%20Graphics%2c%20Ltd/S3%20ViRGE%E2%88%95VX%20Integrated%203D%20Accelerator%20(1996-06).pdf]
 };
 
+enum ATICard {
+	ATI_EGAVGAWonder,            // ATI 18800 EGA/VGA Wonder
+	ATI_VGAWonder,               // ATI 28800-1 VGA Wonder
+	ATI_VGAWonderPlus,           // ATI 28800-2 VGA Wonder+
+	ATI_VGAWonderXL,             // ATI 28800-4 VGA WonderXL
+	ATI_VGAWonderXL24,           // ATI 28800-6 VGA Wonder
+	ATI_Mach8,                   // ATI 38800-1
+	ATI_Mach32,                  // ATI 68800-3
+	ATI_Mach64                   // ATI 88800GX
+};
+
 typedef Bitu				(LoopHandler)(void);
 
 extern Config*				control;
 extern SVGACards			svgaCard;
+extern ATICard				atiCard;
 extern S3Card				s3Card;
+extern HerculesCard			hercCard;
 extern MachineType			machine;
 extern bool             SDLNetInited, uselfn;
 extern bool				mono_cga;
@@ -270,13 +300,6 @@ static inline constexpr bytecount_t _tebibytes(const bytecount_t x) {
 #ifndef SAVE_STATE_H_INCLUDED
 #define SAVE_STATE_H_INCLUDED
 
-#include <sstream>
-#include <map>
-#include <algorithm>
-#include <functional>
-#include <vector>
-
-
 #define WRITE_POD(x,y) \
 	stream.write(reinterpret_cast<const char*>( (x) ), sizeof( (y) ) );
 
@@ -322,22 +345,22 @@ private:
     class RawBytes
     {
     public:
-        RawBytes() : dataExists(false), isCompressed(false) {}
+        RawBytes() {}
         void set(const std::string& stream);
         std::string get() const; //throw (Error)
         void compress() const;   //throw (Error)
         bool dataAvailable() const;
     private:
-        bool dataExists; //determine whether set method (even with empty string) was called
-        mutable bool isCompressed; //design for logical not binary const
+        bool dataExists = false; //determine whether set method (even with empty string) was called
+        mutable bool isCompressed = false; //design for logical not binary const
         mutable std::string bytes; //
     };
 
     struct CompData
     {
-        CompData(Component& cmp) : comp(cmp), rawBytes(MAX_PAGE*SLOT_COUNT) {}
+        CompData(Component& cmp) : comp(cmp) {}
         Component& comp;
-        std::vector<RawBytes> rawBytes;
+        std::vector<RawBytes> rawBytes = std::vector<RawBytes>(MAX_PAGE * SLOT_COUNT);
     };
 
     typedef std::map<std::string, CompData> CompEntry;
@@ -445,3 +468,10 @@ void readString(std::istream& stream, std::string& data)
     stream.read(&data[0], stringSize * sizeof(std::string::value_type));
 }
 #endif //SAVE_STATE_H_INCLUDED
+
+#if defined (WIN32)
+int _wmkdir_p(const wchar_t *pathname);
+#else
+int mkdir_p(const char *pathname, mode_t mode);
+#endif
+

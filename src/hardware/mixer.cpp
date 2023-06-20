@@ -18,7 +18,7 @@
 
 
 /* 
-    Remove the sdl code from here and have it handeld in the sdlmain.
+    Remove the sdl code from here and have it handled in sdlmain.
     That should call the mixer start from there or something.
 */
 
@@ -225,6 +225,11 @@ inline void MixerChannel::updateSlew(void) {
         max_change = 0x7FFFFFFFUL;
 }
 
+void MIXER_SetMaster(float vol0, float vol1) {
+	mixer.mastervol[0] = vol0;
+	mixer.mastervol[1] = vol1;
+}
+
 MixerChannel * MIXER_AddChannel(MIXER_Handler handler,Bitu freq,const char * name) {
     MixerChannel * chan=new MixerChannel();
     chan->freq_fslew = 0;
@@ -305,9 +310,9 @@ void MixerChannel::SetScale( float f ) {
 }
 
 void MixerChannel::SetScale(float _left, float _right) {
-	// Constrain application-defined volume between 0% and 100%
+	// Constrain application-defined volume between 0% and 400%
 	const float min_volume(0.0);
-	const float max_volume(1.0);
+	const float max_volume(4.0);
 	_left  = clamp(_left,  min_volume, max_volume);
 	_right = clamp(_right, min_volume, max_volume);
 	if (scale[0] != _left || scale[1] != _right) {
@@ -1044,7 +1049,7 @@ public:
         if (cmd->FindExist("/NOSHOW"))
             return;
         else if (cmd->FindExist("/GUI"))
-            GUI_Shortcut(20);
+            GUI_Shortcut(40);
         else
             WriteOut(mixerinfo().c_str());
     }
@@ -1149,16 +1154,16 @@ void MAPPER_RecVolumeDown(bool pressed) {
 void MIXER_Controls_Init() {
     DOSBoxMenu::item *item;
 
-    MAPPER_AddHandler(MAPPER_VolumeUp  ,MK_kpplus, MMODHOST,"volup","Increase volume",&item);
+    MAPPER_AddHandler(MAPPER_VolumeUp,MK_kpplus, MMODHOST,"volup","Increase volume",&item);
     item->set_text("Increase volume");
     
     MAPPER_AddHandler(MAPPER_VolumeDown,MK_kpminus,MMODHOST,"voldown","Decrease volume",&item);
     item->set_text("Decrease volume");
 
-    MAPPER_AddHandler(MAPPER_RecVolumeUp  ,MK_nothing, 0,"recvolup","Increase rec. volume",&item);
+    MAPPER_AddHandler(MAPPER_RecVolumeUp,MK_nothing, 0,"recvolup","Increase recording volume",&item);
     item->set_text("Increase recording volume");
 
-    MAPPER_AddHandler(MAPPER_RecVolumeDown,MK_nothing, 0,"recvoldown","Decrease rec. volume",&item);
+    MAPPER_AddHandler(MAPPER_RecVolumeDown,MK_nothing, 0,"recvoldown","Decrease recording volume",&item);
     item->set_text("Decrease recording volume");
 }
 

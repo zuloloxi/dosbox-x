@@ -351,6 +351,7 @@ void DoPS2Callback(uint16_t data, int16_t mouseX, int16_t mouseY) {
                 CPU_Push16((uint16_t)(ydiff % 256));
                 CPU_Push16((uint16_t)GetWheel8bit());
                 CPU_Push16((uint16_t)0);
+                break;
             default:   // Standard protocol
                 CPU_Push16((uint16_t)mdat);
                 CPU_Push16((uint16_t)(xdiff % 256));
@@ -387,8 +388,26 @@ Bitu PS2_Handler(void) {
 #define MOUSE_MIDDLE_RELEASED 64
 #define MOUSE_WHEEL_MOVED 128
 #define MOUSE_ABSOLUTE 256
-#define MOUSE_DUMMY 256
-#define MOUSE_DELAY 5.0
+
+unsigned int user_mouse_report_rate = 0;
+unsigned int mouse_report_rate = 200; /* DOSBox SVN compatible default (MOUSE_DELAY = 5.0 ms) */
+pic_tickindex_t MOUSE_DELAY = 5.0; /* This was once a hard #define */
+
+void UpdateMouseReportRate(void) {
+	/* If the user did not specify an explicit rate, then whatever the current rate goes and update MOUSE_DELAY.
+	 * This is done so that PS/2 mouse emulation can accept the commands to change reporting rate and have it work */
+	if (user_mouse_report_rate != 0)
+		mouse_report_rate = user_mouse_report_rate;
+
+	MOUSE_DELAY = 1000.0 / mouse_report_rate;
+}
+
+void ChangeMouseReportRate(unsigned int new_rate) {
+	if (user_mouse_report_rate == 0) {
+		mouse_report_rate = new_rate;
+		UpdateMouseReportRate();
+	}
+}
 
 void MOUSE_Limit_Events(Bitu /*val*/) {
     mouse.timer_in_progress = false;
@@ -436,10 +455,6 @@ INLINE void Mouse_AddEvent(uint8_t type) {
     }
 }
 
-void MOUSE_DummyEvent(void) {
-    Mouse_AddEvent(MOUSE_DUMMY);
-}
-
 // ***************************************************************************
 // Mouse cursor - text mode
 // ***************************************************************************
@@ -474,7 +489,7 @@ void DrawCursorText() {
     //use current page (CV program)
     uint8_t page = real_readb(BIOSMEM_SEG,BIOSMEM_CURRENT_PAGE);
 
-    if (mouse.cursorType == 0) {
+    if (mouse.cursorType == 0 || mouse.cursorType == 2/*Microsoft Word 5.5 even in text mode*/) {
         uint16_t result;
         ReadCharAttr((uint16_t)mouse.backposx,(uint16_t)mouse.backposy,page,&result);
         mouse.backData[0]	= (uint8_t)(result & 0xFF);
@@ -869,8 +884,8 @@ const char* Mouse_GetSelected(int x1, int y1, int x2, int y2, int w, int h, uint
     ttfcols = ttf.cols;
     if (ttfuse&&isDBCSCP()&&dbcs_sbcs&&!(c1==0&&c2==(int)(ttf.cols-1)&&r1==0&&r2==(int)(ttf.lins-1))) {
         ttf_cell *curAC = curAttrChar;
-        for (unsigned int y = 0; y < ttf.lins; y++) {
-            if ((int)y>=r1&&(int)y<=r2) {
+        for (int y = 0; y < (int)ttf.lins; y++) {
+            if (y>=r1&&y<=r2) {
                 for (unsigned int x = 0; x < ttf.cols; x++)
                     if ((int)x>=c1&&(int)x<=c2&&curAC[rtl?ttf.cols-x-1:x].selected) {
                         if ((int)x==c1&&c1>0&&curAC[rtl?ttf.cols-x-1:x].skipped&&!curAC[rtl?ttf.cols-x-2:x-1].selected&&curAC[rtl?ttf.cols-x-2:x-1].doublewide) {
@@ -893,6 +908,7 @@ const char* Mouse_GetSelected(int x1, int y1, int x2, int y2, int w, int h, uint
     } else
 #endif
 	for (int i=r1; i<=r2; i++) {
+        uint16_t startlen = len;
         bool lead1 = false, lead2 = false;
         if ((showdbcs && !ttfuse && !IS_DOSV && isDBCSCP()
 #if defined(USE_TTF)
@@ -909,6 +925,7 @@ const char* Mouse_GetSelected(int x1, int y1, int x2, int y2, int w, int h, uint
 				uint16_t address=((i*80)+(ttfuse&&rtl?ttfcols-j-1:j))*2;
 				PhysPt where = CurMode->pstart+address;
 				result=mem_readw(where);
+                if (!result || (result == 0xFE && j && mem_readw(where-2) == 0)) result = 32;
                 if ((result & 0xFF00u) != 0u && (result & 0x7Cu) == 0x08u && (result%0xff) - (result/0x100) == 0xB) {
                     uint8_t val = result/0x100+31;
                     for (auto it = pc98boxdrawmap.begin(); it != pc98boxdrawmap.end(); ++it)
@@ -935,6 +952,7 @@ const char* Mouse_GetSelected(int x1, int y1, int x2, int y2, int w, int h, uint
                 if (lead2) lead2=false;
                 else if (isKanji1(real_readb(seg,(i*c+j)*2))) lead2=true;
                 result=real_readb(seg,(i*c+j)*2);
+                if ((uint8_t)result==0) result=32;
                 text[len++]=result;
                 if (!lead2 && del_flag && (text[len-1]&0xFF) == 0x7F) text[len-1]++;
                 if (j==c2&&c2<c-1&&lead2) {
@@ -950,7 +968,7 @@ const char* Mouse_GetSelected(int x1, int y1, int x2, int y2, int w, int h, uint
                 && showdbcs) ? std::find(jtbs.begin(), jtbs.end(), std::make_pair(i,j)) != jtbs.end():false;
                 if (!isJEGAEnabled()||j>c1||!find) {
                     ReadCharAttr(ttfuse&&rtl?ttfcols-j-1:j,i,page,&result);
-                    if (!result && CurMode->type == M_DCGA && !IS_J3100) result=32;
+                    if ((uint8_t)result==0) result=32;
 #if defined(USE_TTF)
                     if (ttfuse && isDBCSCP()) {
                         ttf_cell *curAC = curAttrChar+i*ttfcols;
@@ -976,11 +994,11 @@ const char* Mouse_GetSelected(int x1, int y1, int x2, int y2, int w, int h, uint
                 }
 			}
 		}
-		while (len>0&&text[len-1]==32) text[--len]=0;
+		if (ttfuse&&rtl) std::reverse(text+startlen, text+len);
+		while (len>0&&text[len-1]==32) {text[--len]=0;bdlist.remove(len);}
 		if (i<r2) text[len++]='\n';
 	}
     text[len] = 0;
-    if (ttfuse&&rtl) std::reverse(text, text+len);
 	*textlen=len;
 	return text;
 }
@@ -988,7 +1006,7 @@ const char* Mouse_GetSelected(int x1, int y1, int x2, int y2, int w, int h, uint
 #if defined(WIN32) || defined(MACOSX) || defined(C_SDL2)
 void Mouse_Select(int x1, int y1, int x2, int y2, int w, int h, bool select) {
     int c1=x1, r1=y1, c2=x2, r2=y2, t;
-    uint8_t page = real_readb(BIOSMEM_SEG,BIOSMEM_CURRENT_PAGE);
+//    uint8_t page = real_readb(BIOSMEM_SEG,BIOSMEM_CURRENT_PAGE);
     uint16_t c=0, r=0;
     if (IS_PC98_ARCH) {
         c=80;
@@ -1019,12 +1037,12 @@ void Mouse_Select(int x1, int y1, int x2, int y2, int w, int h, bool select) {
 #if defined(USE_TTF)
     ttfuse = ttf.inUse;
     ttfcols = ttf.cols;
-    if (ttfuse&&(!IS_EGAVGA_ARCH||CurMode->mode!=3||isDBCSCP()&&dbcs_sbcs)) {
+    if (ttfuse&&(!IS_EGAVGA_ARCH||CurMode->mode!=3||(isDBCSCP()&&dbcs_sbcs))) {
         ttf_cell *newAC = newAttrChar;
         for (unsigned int y = 0; y < ttf.lins; y++) {
-            if (y>=r1&&y<=r2)
-                for (unsigned int x = 0; x < ttf.cols; x++)
-                    if ((x>=c1||((IS_PC98_ARCH||isDBCSCP()&&dbcs_sbcs)&&c1>0&&x==c1-1&&(newAC[rtl?ttf.cols-x-1:x].chr&0xFF00)&&(newAC[rtl?ttf.cols-x:x+1].chr&0xFF)==32))&&x<=c2)
+            if ((int)y>=r1&&(int)y<=r2)
+                for (int x = 0; x < (int)ttf.cols; x++)
+                    if ((x>=c1||((IS_PC98_ARCH||(isDBCSCP()&&dbcs_sbcs))&&c1>0&&x==c1-1&&(newAC[rtl?ttf.cols-x-1:x].chr&0xFF00)&&(newAC[rtl?ttf.cols-x:x+1].chr&0xFF)==32))&&x<=c2)
                         newAC[rtl?ttf.cols-x-1:x].selected = select?1:0;
             newAC += ttf.cols;
         }
@@ -1618,7 +1636,7 @@ static Bitu INT33_Handler(void) {
             mouse.cursorMask = userdefCursorMask;
             mouse.hotx = (int16_t)reg_bx;
             mouse.hoty = (int16_t)reg_cx;
-            mouse.cursorType = 2;
+            mouse.cursorType = 2;/*NTS: Microsoft Word calls this even in text mode!*/
             DrawCursor();
             break;
         }
@@ -1767,7 +1785,7 @@ static Bitu INT33_Handler(void) {
              *                        04h     Swedish
              *                        05h     Finnish
              *                        06h     Spanish
-             *                        07h     Portugese
+             *                        07h     Portuguese
              *                        08h     Italian
              *
              */
@@ -1795,7 +1813,11 @@ static Bitu INT33_Handler(void) {
 	//       BX = fCursor lock
 	//       CX = FinMouse code
 	//       DX = fMouse busy
-        LOG(LOG_MOUSE, LOG_ERROR)("Get general driver information not implemented");
+        reg_al = 1; // GUESS for MDDs
+        reg_ah = 0x40/*integrated*/ | (mouse.cursorType << 4) | 0x01/*30 reports/sec*/;
+        reg_bx = 0;
+        reg_cx = 0;
+        reg_dx = 0;
         break;
     case 0x26:  /* MS MOUSE v6.26+ - GET MAXIMUM VIRTUAL COORDINATES */
         reg_bx = (mouse.enabled ? 0x0000 : 0xffff);
@@ -2112,6 +2134,9 @@ void MOUSE_Startup(Section *sec) {
         return;
     }
 
+    user_mouse_report_rate=section->Get_int("mouse report rate");
+    UpdateMouseReportRate();
+
     en_int33_hide_if_intsub=section->Get_bool("int33 hide host cursor if interrupt subroutine");
 
     en_int33_hide_if_polling=section->Get_bool("int33 hide host cursor when polling");
@@ -2292,6 +2317,8 @@ static inline void CmdAbsPointerCommand() {
 // IO port handling
 
 static Bitu PortRead(Bitu port, Bitu iolen) {
+    (void)port;
+    (void)iolen;
 
         if (reg_eax != VMWARE_MAGIC)
                 return 0;

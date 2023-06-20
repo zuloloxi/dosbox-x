@@ -16,6 +16,8 @@ extern "C" {
 #include "logging.h"
 #include "menudef.h"
 #include <output/output_opengl.h>
+#include <output/output_tools.h>
+#include <output/output_tools_xbrz.h>
 
 #include <algorithm>
 
@@ -23,6 +25,12 @@ extern "C" {
 #include "render.h"
 
 using namespace std;
+
+extern Bitu frames;
+extern Bitu userResizeWindowWidth;
+extern Bitu userResizeWindowHeight;
+extern Bitu currentWindowWidth;
+extern Bitu currentWindowHeight;
 
 bool setSizeButNotResize();
 
@@ -339,6 +347,10 @@ void OUTPUT_OPENGL_Select( GLKind kind )
     GFX_SetResizeable(true);
     sdl.window = GFX_SetSDLWindowMode(640,400, SCREEN_OPENGL);
     if (sdl.window) {
+        if(sdl_opengl.context) {
+            SDL_GL_DeleteContext(sdl_opengl.context);
+            sdl_opengl.context=0;
+        }
         sdl_opengl.context = SDL_GL_CreateContext(sdl.window);
         sdl.surface = SDL_GetWindowSurface(sdl.window);
     }

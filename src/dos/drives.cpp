@@ -27,6 +27,8 @@
 #include "control.h"
 #include "ide.h"
 
+char *DBCS_upcase(char *);
+
 bool wildmount = false;
 
 bool wild_match(const char *haystack, char *needle) {
@@ -258,7 +260,14 @@ int get_expanded_files(const std::string &path, std::vector<std::string> &paths,
     if (d) {
         while ((dir = readdir(d)) != NULL) {
             host_cnv_char_t *temp_name = CodePageHostToGuest(dir->d_name);
-            if (dir->d_type == DT_REG)
+#if defined(HAIKU)
+            struct stat path_stat;
+            stat(dir->d_name, &path_stat);
+            bool is_regular_file = S_ISREG(path_stat.st_mode);
+#else
+            bool is_regular_file = (dir->d_type == DT_REG);
+#endif
+            if (is_regular_file)
                 names.push_back(temp_name!=NULL?temp_name:dir->d_name);
         }
         closedir(d);
@@ -286,11 +295,14 @@ void Set_Label(char const * const input, char * const output, bool cdrom) {
         Bitu togo     = 11;
         Bitu vnamePos = 0;
         Bitu labelPos = 0;
+        char upcasebuf[12] = {0};
+        strncpy(upcasebuf, input, 11);
+        DBCS_upcase(upcasebuf);
 
         while (togo > 0) {
-            if (input[vnamePos]==0) break;
+            if (upcasebuf[vnamePos]==0) break;
             //Another mscdex quirk. Label is not always uppercase. (Daggerfall)
-            output[labelPos] = toupper(input[vnamePos]);
+            output[labelPos] = upcasebuf[vnamePos];
             labelPos++;
             vnamePos++;
             togo--;
@@ -386,14 +398,14 @@ void DriveManager::ChangeDisk(int drive, DOS_Drive* disk) {
         }
         if (!dos_kernel_disabled) {
             char name[DOS_NAMELENGTH_ASCII],lname[LFN_NAMELENGTH];
-            uint32_t size;uint16_t date;uint16_t time;uint8_t attr;
+            uint32_t size,hsize;uint16_t date;uint16_t time;uint8_t attr;
             RealPt save_dta = dos.dta();
             dos.dta(dos.tables.tempdta);
             DOS_DTA dta(dos.dta());
             char root[7] = {(char)('A'+drive),':','\\','*','.','*',0};
             bool ret = DOS_FindFirst(root,DOS_ATTR_VOLUME);
             if (ret) {
-                dta.GetResult(name,lname,size,date,time,attr);
+                dta.GetResult(name,lname,size,hsize,date,time,attr);
                 DOS_FindNext();
             } else name[0] = 0;
             dos.dta(save_dta);
@@ -447,25 +459,37 @@ void DriveManager::CycleDisk(bool pressed) {
 }
 */
 
-void DriveManager::CycleDisks(int drive, bool notify, int position) {
+void DriveManager::CycleDisks(int drive, bool notify, unsigned int position) {
 	unsigned int numDisks = (unsigned int)driveInfos[drive].disks.size();
 	if (numDisks > 1) {
 		// cycle disk
-		unsigned int currentDisk = (unsigned int)driveInfos[drive].currentDisk;
-        const DOS_Drive* oldDisk = driveInfos[drive].disks[(unsigned int)currentDisk];
+		unsigned int currentDisk = driveInfos[drive].currentDisk;
+        const DOS_Drive* oldDisk = driveInfos[drive].disks[currentDisk];
         if (position<1)
-            currentDisk = ((unsigned int)currentDisk + 1u) % (unsigned int)numDisks;
+            currentDisk = (currentDisk + 1u) % numDisks;
         else if (position>numDisks)
             currentDisk = 0;
         else
             currentDisk = position - 1;
 		DOS_Drive* newDisk = driveInfos[drive].disks[currentDisk];
 		driveInfos[drive].currentDisk = currentDisk;
+		if (drive < MAX_DISK_IMAGES && imageDiskList[drive] != NULL) {
+			imageDiskList[drive]->Release();
+			imageDiskList[drive] = NULL;
+
+			if (strncmp(newDisk->GetInfo(),"fatDrive",8) == 0)
+				imageDiskList[drive] = ((fatDrive *)newDisk)->loadedDisk;
+			else
+				imageDiskList[drive] = (imageDisk *)newDisk;
+
+			if (imageDiskList[drive] != NULL) imageDiskList[drive]->Addref();
+			if ((drive == 2 || drive == 3) && imageDiskList[drive]->hardDrive) updateDPT();
+		}
 		
-		// copy working directory, acquire system resources and finally switch to next drive		
+		// copy working directory, acquire system resources and finally switch to next drive
 		strcpy(newDisk->curdir, oldDisk->curdir);
 		newDisk->Activate();
-        if (!dos_kernel_disabled) newDisk->UpdateDPB(currentDrive);
+		if (!dos_kernel_disabled) newDisk->UpdateDPB(currentDrive);
 		Drives[drive] = newDisk;
 		if (notify) LOG_MSG("Drive %c: disk %d of %d now active", 'A'+drive, currentDisk+1, numDisks);
 	}
@@ -483,11 +507,11 @@ void DriveManager::CycleAllCDs(void) {
 			unsigned int currentDisk = driveInfos[idrive].currentDisk;
             const DOS_Drive* oldDisk = driveInfos[idrive].disks[currentDisk];
             if (dynamic_cast<const isoDrive*>(oldDisk) == NULL) continue;
-			currentDisk = ((unsigned int)currentDisk + 1u) % (unsigned int)numDisks;		
+			currentDisk = (currentDisk + 1u) % numDisks;
 			DOS_Drive* newDisk = driveInfos[idrive].disks[currentDisk];
 			driveInfos[idrive].currentDisk = currentDisk;
 			
-			// copy working directory, acquire system resources and finally switch to next drive		
+			// copy working directory, acquire system resources and finally switch to next drive
 			strcpy(newDisk->curdir, oldDisk->curdir);
 			newDisk->Activate();
             if (!dos_kernel_disabled) newDisk->UpdateDPB(currentDrive);

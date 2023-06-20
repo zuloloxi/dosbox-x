@@ -52,7 +52,7 @@
     <Filter Include="Sources\libs\gui_tk">
       <UniqueIdentifier>{5d5417f9-58a8-4b86-a8f7-8626b7120043}</UniqueIdentifier>
     </Filter>
-    <Filter Include="Sources\libs\porttalk">
+    <Filter Include="Sources\libs\passthroughio">
       <UniqueIdentifier>{cd3f8fa5-7241-4256-a47c-a74ae8a95284}</UniqueIdentifier>
     </Filter>
     <Filter Include="Sources\misc">
@@ -516,6 +516,9 @@
     <ClCompile Include="..\src\hardware\vga_pc98_gdc.cpp">
       <Filter>Sources\hardware</Filter>
     </ClCompile>
+    <ClCompile Include="..\src\hardware\vga_ati.cpp">
+      <Filter>Sources\hardware</Filter>
+    </ClCompile>
     <ClCompile Include="..\src\hardware\vga_s3.cpp">
       <Filter>Sources\hardware</Filter>
     </ClCompile>
@@ -546,7 +549,7 @@
     <ClCompile Include="..\src\hardware\glide.cpp">
       <Filter>Sources\hardware</Filter>
     </ClCompile>
-    <ClCompile Include="..\src\hardware\parport\directlpt_win32.cpp">
+    <ClCompile Include="..\src\hardware\parport\directlpt.cpp">
       <Filter>Sources\hardware\parport</Filter>
     </ClCompile>
     <ClCompile Include="..\src\hardware\parport\filelpt.cpp">
@@ -645,8 +648,8 @@
     <ClCompile Include="..\src\libs\gui_tk\gui_tk.cpp">
       <Filter>Sources\libs\gui_tk</Filter>
     </ClCompile>
-    <ClCompile Include="..\src\libs\porttalk\porttalk.cpp">
-      <Filter>Sources\libs\porttalk</Filter>
+    <ClCompile Include="..\src\libs\passthroughio\passthroughio.cpp">
+      <Filter>Sources\libs\passthroughio</Filter>
     </ClCompile>
     <ClCompile Include="..\src\misc\clipboard.cpp">
       <Filter>Sources\misc</Filter>
@@ -664,6 +667,9 @@
       <Filter>Sources\misc</Filter>
     </ClCompile>
     <ClCompile Include="..\src\misc\ethernet_slirp.cpp">
+      <Filter>Sources\misc</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\misc\ethernet_nothing.cpp">
       <Filter>Sources\misc</Filter>
     </ClCompile>
     <ClCompile Include="..\src\misc\regionalloctracking.cpp">
@@ -1587,6 +1593,27 @@
     <ClCompile Include="..\src\libs\mt32\Display.cpp">
       <Filter>Sources\libs\mt32</Filter>
     </ClCompile>
+    <ClCompile Include="..\src\ints\pc98_lio.cpp">
+      <Filter>Sources\ints</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\hardware\vga_pc98_gdc_draw.cpp">
+      <Filter>Sources\hardware</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\misc\mkdir_p.cpp">
+      <Filter>Sources\misc</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\hardware\snd_pc98\cbus\pcm86io.c">
+      <Filter>Sources\hardware\snd_pc98\cbus</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\gamelink\gamelink.cpp" />
+    <ClCompile Include="..\src\gamelink\gamelink_term.cpp" />
+    <ClCompile Include="..\src\output\output_gamelink.cpp" />
+    <ClCompile Include="..\src\hardware\imfc_rom.c">
+      <Filter>Sources\hardware</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\hardware\imfc.cpp">
+      <Filter>Sources\hardware</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\src\aviwriter\avi.h">
@@ -1712,6 +1739,9 @@
     <ClInclude Include="..\src\hardware\dbopl.h">
       <Filter>Sources\hardware</Filter>
     </ClInclude>
+    <ClInclude Include="..\src\hardware\hardopl.h">
+      <Filter>Sources\hardware</Filter>
+    </ClInclude>
     <ClInclude Include="..\src\hardware\nukedopl.h">
       <Filter>Sources\hardware</Filter>
     </ClInclude>
@@ -1742,7 +1772,7 @@
     <ClInclude Include="..\src\hardware\voodoo_vogl.h">
       <Filter>Sources\hardware</Filter>
     </ClInclude>
-    <ClInclude Include="..\src\hardware\parport\directlpt_win32.h">
+    <ClInclude Include="..\src\hardware\parport\directlpt.h">
       <Filter>Sources\hardware\parport</Filter>
     </ClInclude>
     <ClInclude Include="..\src\hardware\parport\filelpt.h">
@@ -1925,10 +1955,16 @@
     <ClInclude Include="..\include\cp855_uni.h">
       <Filter>Includes</Filter>
     </ClInclude>
+    <ClInclude Include="..\include\cp856_uni.h">
+      <Filter>Includes</Filter>
+    </ClInclude>
     <ClInclude Include="..\include\cp857_uni.h">
       <Filter>Includes</Filter>
     </ClInclude>
     <ClInclude Include="..\include\cp858_uni.h">
+      <Filter>Includes</Filter>
+    </ClInclude>
+    <ClInclude Include="..\include\cp859_uni.h">
       <Filter>Includes</Filter>
     </ClInclude>
     <ClInclude Include="..\include\cp860_uni.h">
@@ -1950,6 +1986,12 @@
       <Filter>Includes</Filter>
     </ClInclude>
     <ClInclude Include="..\include\cp866_uni.h">
+      <Filter>Includes</Filter>
+    </ClInclude>
+    <ClInclude Include="..\include\cp867_uni.h">
+      <Filter>Includes</Filter>
+    </ClInclude>
+    <ClInclude Include="..\include\cp868_uni.h">
       <Filter>Includes</Filter>
     </ClInclude>
     <ClInclude Include="..\include\cp869_uni.h">
@@ -2515,6 +2557,16 @@
     </ClInclude>
     <ClInclude Include="..\src\libs\mt32\Display.h">
       <Filter>Sources\libs\mt32</Filter>
+    </ClInclude>
+    <ClInclude Include="..\src\hardware\snd_pc98\cbus\pcm86io.h">
+      <Filter>Sources\hardware\snd_pc98\cbus</Filter>
+    </ClInclude>
+    <ClInclude Include="..\src\libs\mt32\Types.h" />
+    <ClInclude Include="..\src\gamelink\gamelink.h" />
+    <ClInclude Include="..\src\gamelink\scancodes_windows.h" />
+    <ClInclude Include="..\src\output\output_gamelink.h" />
+    <ClInclude Include="..\src\cpu\dynamic_alloc_common.h">
+      <Filter>Sources\cpu</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>

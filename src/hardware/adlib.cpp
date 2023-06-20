@@ -533,7 +533,7 @@ struct RawHeader {
 /*
 	The Raw Tables is < 128 and is used to convert raw commands into a full register index 
 	When the high bit of a raw command is set it indicates the cmd/data pair is to be sent to the 2nd port
-	After the conversion table the raw data follows immediatly till the end of the chunk
+	After the conversion table the raw data follows immediately till the end of the chunk
 */
 
 //Table to map the opl register to one <127 for dro saving
@@ -1050,7 +1050,7 @@ void Module::Init( Mode m ) {
 	case MODE_OPL2:
 		break;
 	case MODE_DUALOPL2:
-		//Setup opl3 mode in the hander
+		//Setup opl3 mode in the handler
 		handler->WriteReg( 0x105, 1 );
 		//Also set it up in the cache so the capturing will start opl3
 		CacheWrite( 0x105, 1 );
@@ -1076,7 +1076,10 @@ static void OPL_CallBack(Bitu len) {
 }
 
 static Bitu OPL_Read(Bitu port,Bitu iolen) {
-    if (IS_PC98_ARCH) port >>= 8u; // C8D2h -> C8h, C9D2h -> C9h, OPL emulation looks only at bit 0.
+    if (IS_PC98_ARCH) {
+        if (port == 0xC8D2 && iolen == 1 && module->PortRead(port, iolen) == 0xFF && module->PortRead(port/0x100, iolen) == 0) return 0xFF; // fix for First Queen
+        port >>= 8u; // C8D2h -> C8h, C9D2h -> C9h, OPL emulation looks only at bit 0.
+    }
 
 	return module->PortRead( port, iolen );
 }
@@ -1107,7 +1110,7 @@ void SaveRad() {
 	fwrite( "RAD by REALiTY!!", 1, 16, handle );
 	b[w++] = 0x10;		//version
 	b[w++] = 0x06;		//default speed and no description
-	//Write 18 instuments for all operators in the cache
+	//Write 18 instruments for all operators in the cache
 	for ( unsigned int i = 0; i < 18; i++ ) {
 		uint8_t* set = module->cache + ( i / 9 ) * 256;
 		Bitu offset = ((i % 9) / 3) * 8 + (i % 3);
@@ -1322,12 +1325,7 @@ OPL_Mode Module::oplmode=OPL_none;
 }	//Adlib Namespace
 
 std::string getoplmode() {
-#if !defined(__FreeBSD__)
-	// Todo: is this needed at all? opmode cannot be null...
-	if (Adlib::Module::oplmode == NULL || Adlib::Module::oplmode == OPL_none) return "None";
-#else
-	if (Adlib::Module::oplmode == 0 || Adlib::Module::oplmode == OPL_none) return "None";
-#endif
+    if (Adlib::Module::oplmode == OPL_none) return "None";
     else if (Adlib::Module::oplmode == OPL_cms) return "CMS";
     else if (Adlib::Module::oplmode == OPL_opl2) return "OPL2";
     else if (Adlib::Module::oplmode == OPL_dualopl2) return "Dual OPL2";

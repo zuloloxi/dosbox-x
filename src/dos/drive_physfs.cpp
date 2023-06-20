@@ -46,6 +46,7 @@
 #include "../libs/physfs/physfs_platform_unix.c"
 #include "../libs/physfs/physfs_platform_windows.c"
 #include "../libs/physfs/physfs_platform_winrt.cpp"
+#include "../libs/physfs/physfs_platform_haiku.cpp"
 #include "../libs/physfs/physfs_unicode.c"
 
 extern int lfn_filefind_handle;
@@ -58,6 +59,8 @@ int  MSCDEX_RemoveDrive(char driveLetter);
 int  MSCDEX_AddDrive(char driveLetter, const char* physicalPath, uint8_t& subUnit);
 bool MSCDEX_HasMediaChanged(uint8_t subUnit);
 bool MSCDEX_GetVolumeName(uint8_t subUnit, char* name);
+bool isDBCSCP();
+char * DBCS_upcase(char * str);
 
 PHYSFS_sint64 PHYSFS_fileLength(const char *name) {
 	PHYSFS_file *f = PHYSFS_openRead(name);
@@ -366,7 +369,7 @@ bool physfsDrive::setOverlaydir(const char * name) {
         return false;
 	} else {
         if (oldwrite) PHYSFS_unmount(oldwrite);
-        PHYSFS_mount(newname, NULL, 1);
+        PHYSFS_mount(newname, NULL, 0);
         dirCache.EmptyCache();
     }
 	if (oldwrite) free((char *)oldwrite);
@@ -407,7 +410,7 @@ bool physfsDrive::FileOpen(DOS_File * * file,const char * name,uint32_t flags) {
 		return false;
 	}
 
-	*file=new physfsFile(name,hand,0x202,newname,false);
+	*file=new physfsFile(name,hand,0x2,newname,false);
 	(*file)->flags=flags;  //for the inheritance flag and maybe check for others.
 	return true;
 }
@@ -447,7 +450,7 @@ bool physfsDrive::FileCreate(DOS_File * * file,const char * name,uint16_t attrib
 	}
 
 	/* Make the 16 bit device information */
-	*file=new physfsFile(name,hand,0x202,newname,true);
+	*file=new physfsFile(name,hand,0x2,newname,true);
 	(*file)->flags=OPEN_READWRITE;
 	if(!existing_file) {
 		strcpy(newname,basedir);
@@ -614,7 +617,7 @@ bool physfsDrive::FindNext(DOS_DTA & dta) {
 	char * dir_ent, *ldir_ent;
 	char full_name[CROSS_LEN], lfull_name[LFN_NAMELENGTH+1];
 
-	uint8_t srch_attr;char srch_pattern[DOS_NAMELENGTH_ASCII];
+	uint8_t srch_attr;char srch_pattern[LFN_NAMELENGTH+1];
 	uint8_t find_attr;
 
     dta.GetSearchParams(srch_attr,srch_pattern,false);
@@ -651,7 +654,7 @@ again:
 
 	/*file is okay, setup everything to be copied in DTA Block */
 	char find_name[DOS_NAMELENGTH_ASCII], lfind_name[LFN_NAMELENGTH+1];
-	uint16_t find_date,find_time;uint32_t find_size;
+	uint16_t find_date,find_time;uint32_t find_size,find_hsize=0;
 	find_size=(uint32_t)PHYSFS_fileLength(lfull_name);
     time_t mytime = statbuf.modtime;
 	struct tm *time;
@@ -664,12 +667,15 @@ again:
 	}
 	if(strlen(dir_ent)<DOS_NAMELENGTH_ASCII){
 		strcpy(find_name,dir_ent);
-		upcase(find_name);
+		if (IS_PC98_ARCH || isDBCSCP())
+			DBCS_upcase(find_name);
+		else
+			upcase(find_name);
 	}
 	strcpy(lfind_name,ldir_ent);
 	lfind_name[LFN_NAMELENGTH]=0;
 
-	dta.SetResult(find_name,lfind_name,find_size,find_date,find_time,find_attr);
+	dta.SetResult(find_name,lfind_name,find_size,find_hsize,find_date,find_time,find_attr);
 	return true;
 }
 
@@ -738,14 +744,14 @@ bool physfsFile::Seek(uint32_t * pos,uint32_t type) {
 	switch (type) {
 	case DOS_SEEK_SET:break;
 	case DOS_SEEK_CUR:mypos += PHYSFS_tell(fhandle); break;
-	case DOS_SEEK_END:mypos += PHYSFS_fileLength(fhandle)-mypos; break;
+	case DOS_SEEK_END:mypos += PHYSFS_fileLength(fhandle); break;
 	default:
 	//TODO Give some doserrorcode;
 		return false;//ERROR
 	}
 
 	if (!PHYSFS_seek(fhandle,mypos)) {
-		// Out of file range, pretend everythings ok
+		// Out of file range, pretend everything's ok
 		// and move file pointer top end of file... ?! (Black Thorne)
 		PHYSFS_seek(fhandle,PHYSFS_fileLength(fhandle));
 	};

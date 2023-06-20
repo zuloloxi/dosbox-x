@@ -49,6 +49,7 @@ uint8_t *GetSbcs24Font(Bitu code);
 uint8_t *GetDbcsFont(Bitu code);
 uint8_t *GetDbcs24Font(Bitu code);
 void DOSV_FillScreen();
+std::string GetDOSBoxXPath(bool withexe=false);
 void ResolvePath(std::string& in);
 void INT10_ReadString(uint8_t row, uint8_t col, uint8_t flag, uint8_t attr, PhysPt string, uint16_t count,uint8_t page);
 bool INT10_SetDOSVModeVtext(uint16_t mode, enum DOSV_VTEXT_MODE vtext_mode);
@@ -371,14 +372,14 @@ graphics_chars:
 /* General */
 		case 0x30:/* Get Font Information */
 			switch (reg_bh) {
-			case 0x00:	/* interupt 0x1f vector */
+			case 0x00:	/* interrupt 0x1f vector */
 				{
 					RealPt int_1f=RealGetVec(0x1f);
 					SegSet16(es,RealSeg(int_1f));
 					reg_bp=RealOff(int_1f);
 				}
 				break;
-			case 0x01:	/* interupt 0x43 vector */
+			case 0x01:	/* interrupt 0x43 vector */
 				{
 					RealPt int_43=RealGetVec(0x43);
 					SegSet16(es,RealSeg(int_43));
@@ -429,6 +430,47 @@ graphics_chars:
 	case 0x12:								/* alternate function select */
 		if (!IS_EGAVGA_ARCH && machine != MCH_MCGA)
 			break;
+
+		if (reg_bh == 0x55 && IS_VGA_ARCH && svgaCard == SVGA_ATI) { /* ATI VGA ALTERNATE FUNC SELECT ENHANCED FEATURES */
+			/* NTS: When WHATVGA detects an ATI chipset, all modesetting within the program REQUIRES this function or
+			 *      else it does not change the video mode. This function is heavily relied on by WHATVGA to detect
+			 *      whether or not the video mode exists, INCLUDING the base VGA standard modes! */
+			if (!IS_VGA_ARCH) break;
+			if (svgaCard!=SVGA_ATI) break;
+			if (reg_bl > 6) break;
+
+			switch (reg_bl) {
+				case 0x02: /*get status*/
+					reg_al = 0x08/*enhanced features enabled*/ | (2/*multisync monitor*/ << 5u);
+					break;
+				case 0x06: { /*get mode table*/
+					unsigned char video_mode = reg_al;
+					/* entry: AL = video mode
+					 * exit:  If mode valid: ES:BP = pointer to parameter table (ATI mode table), ES:SI = pointer to parameter table supplement
+					 *        If mode invalid: ES and BP unchanged, SI unchanged
+					 *
+					 * Also DI == 0? [http://hackipedia.org/browse.cgi/Computer/Platform/PC%2c%20IBM%20compatible/Video/VGA/SVGA/ATI%2c%20Array%20Technology%20Inc/ATI%20Mach64%20BIOS%20Kit%20Technical%20Reference%20Manuals%20PN%20BIO%2dC012XX1%2d05%20%281994%29%20v5%2epdf] */
+					/* FIXME! Need to return pointers to REAL table data!
+					 *        This satisfies WHATVGA for now which only cares that this interrupt call signals the mode exists,
+					 *        although the video mode info it shows is understandably weird and wacky. */
+					/* TODO: Scan an actual parameter table, including one that includes the vendor specific INT 10h modes for SVGA, here */
+					LOG(LOG_INT10,LOG_DEBUG)("ATI VGA INT 12h Get Mode Table for mode 0x%2x",video_mode);
+					if ((video_mode >= 0 && video_mode <= 7) || (video_mode >= 13 && video_mode <= 19)) {//standard VGA for now!
+						SegSet16(es,0xABCD);
+						reg_bp = 0x1234;
+					}
+					} break;
+				case 0x00: /*disable enhanced features*/
+				case 0x01: /*enable enhanced features*/
+				case 0x03: /*disable register trapping (CGA emulation)*/
+				case 0x04: /*enable register trapping*/
+				case 0x05: /*program mode described by table at ES:BP*/
+				default:
+					LOG(LOG_INT10,LOG_DEBUG)("Unhandled ATI VGA INT 12h function: AX=%04x BX=%04x",reg_ax,reg_bx);
+					break;
+			}
+		}
+
 		switch (reg_bl) {
 		case 0x10:							/* Get EGA Information */
             if (machine != MCH_MCGA) {
@@ -1128,6 +1170,10 @@ CX	640x480	800x600	  1024x768/1280x1024
 			SegSet16(es, GetGaijiSeg());
 		}
 		break;
+    case 0xdb:
+        // ETen call
+        // if (reg_al==1) reg_ax = 0;
+        break;
 	case 0xf0:
 		INT10_EGA_RIL_ReadRegister(reg_bl, reg_dx);
 		break;
@@ -1168,7 +1214,7 @@ CX	640x480	800x600	  1024x768/1280x1024
 		break;
 	default:
 		LOG(LOG_INT10,LOG_ERROR)("Function %4X not supported",reg_ax);
-//		reg_al=0x00;		//Successfull, breaks marriage
+//		reg_al=0x00;		//Successful, breaks marriage
 		break;
 	}
 	return CBRET_NONE;
@@ -1334,11 +1380,27 @@ typedef struct tagBITMAPINFOHEADER {
 
 FILE *Try_Load_FontFile(std::string filename) {
     FILE *fp;
-    std::string resdir,tmpdir;
+    std::string confdir,resdir,tmpdir,exepath;
 
     /* try to load file from working directory */
     if ((fp = fopen(filename.c_str(),"rb")))
         return fp;
+
+    /* try to load file from program directory */
+    exepath=GetDOSBoxXPath();
+    if (!exepath.empty()) {
+        tmpdir = exepath + filename;
+        if ((fp = fopen(tmpdir.c_str(),"rb")))
+            return fp;
+    }
+
+    /* try to load file from user config directory */
+    Cross::GetPlatformConfigDir(confdir);
+    if (!confdir.empty()) {
+        tmpdir = confdir + filename;
+        if ((fp = fopen(tmpdir.c_str(),"rb")))
+            return fp;
+    }
 
     /* try to load file from resources directory */
     Cross::GetPlatformResDir(resdir);

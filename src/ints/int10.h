@@ -158,6 +158,13 @@ typedef struct {
 	uint8_t text_row;
 } Int10Data;
 
+typedef struct {
+	uint8_t red;
+	uint8_t green;
+	uint8_t blue;
+	uint8_t alpha;		// unused
+} alt_rgb;
+
 #define _EGA_HALF_CLOCK			0x0001
 #define _DOUBLESCAN			    0x0002  /* CGA/EGA on VGA doublescan (bit 7 of max scanline) */
 #define _VGA_PIXEL_DOUBLE		0x0004
@@ -167,6 +174,7 @@ typedef struct {
 #define _S3_POW2_STRIDE			0x0040  /* Stride must be a power of 2, round up after offset calculation */
 #define _HIGH_DEFINITION        0x0040
 #define _UNUSUAL_MODE           0x0080
+#define _DO_NOT_LIST            0x0100  /* support the mode but do not list in VBE mode enumeration */
 #define _USER_DISABLED          0x4000  /* disabled (cannot set mode) but still listed in modelist */
 #define _USER_MODIFIED          0x8000  /* user modified (through VESAMOED) */
 
@@ -207,6 +215,8 @@ void INT10_TeletypeOutputAttr(uint8_t chr,uint8_t attr,bool useattr);
 void INT10_ReadCharAttr(uint16_t * result,uint8_t page);
 void INT10_WriteChar(uint16_t chr,uint8_t attr,uint8_t page,uint16_t count,bool showattr);
 void INT10_WriteString(uint8_t row,uint8_t col,uint8_t flag,uint8_t attr,PhysPt string,uint16_t count,uint8_t page);
+
+bool CheckAnotherDisplayDriver();
 
 /* Graphics Stuff */
 void INT10_PutPixel(uint16_t x,uint16_t y,uint8_t page,uint8_t color);
